@@ -317,3 +317,112 @@ The analysis UUID is displayed when you run `/botsee analyze`:
 📊 Analysis started: abc-def-123
 ```
 Copy the UUID and use it with the results commands to view detailed analysis data.
+
+---
+
+## Agent Usage Notes
+
+This skill is designed for **non-interactive agent usage**. All commands accept arguments via command-line flags - no prompts or user input required.
+
+### Key Considerations for Agents
+
+**1. Signup Flow Requires Human Intervention**
+
+For **new users** without an API key, the setup command creates a signup token and displays a URL:
+```bash
+/botsee setup <domain>
+# Outputs signup URL, waits up to 5 minutes for completion
+```
+
+**Agents should:**
+- Use the `--api-key` flag if API key is available
+- Inform user if signup is needed (cannot be completed by agent)
+- Consider API key as a prerequisite for autonomous operation
+
+**2. Async Operations with Polling**
+
+Two commands poll for completion:
+- `/botsee setup` (signup only): 5 minute timeout
+- `/botsee analyze`: 10 minute timeout
+
+Commands will block until complete or timeout. No intermediate progress updates.
+
+**3. Analysis Discovery**
+
+To view detailed results after analysis:
+1. Run `/botsee analyze` and capture the analysis UUID from output
+2. Use UUID with `/botsee results-*` commands
+
+**Recommended pattern:**
+```bash
+# Run analysis
+output=$(/botsee analyze)
+# Extract UUID (line containing "Analysis started:")
+uuid=$(echo "$output" | grep "Analysis started:" | awk '{print $NF}')
+# View results
+/botsee results-competitors "$uuid"
+```
+
+**4. Configuration Files**
+
+Two config files exist:
+- **User config:** `~/.botsee/config.json` (API key + site UUID)
+- **Workspace config:** `.context/botsee-config.json` (generation defaults, optional)
+
+Agents can discover state via:
+- `/botsee` - Shows account status
+- `/botsee config-show` - Shows workspace config
+
+**5. Credit Costs**
+
+All operations that consume credits display remaining balance. Agents should:
+- Check balance before expensive operations (`/botsee` command)
+- Handle "Insufficient credits" errors gracefully
+- Monitor credit usage (shown after each operation)
+
+**Costs:**
+- Setup (~75 credits with defaults 2/2/5)
+- Analysis (~660 credits per run)
+- Content generation (15 credits)
+
+**6. Error Handling**
+
+All errors exit with code 1 and print to stderr. Error messages include:
+- HTTP status codes (when relevant)
+- Actionable next steps
+- No API key leakage (sanitized)
+
+**7. Idempotency**
+
+- **Safe to retry:** Status, list, get commands (read-only)
+- **Not idempotent:** Create commands (will create duplicates)
+- **Updates:** Require specific UUID, safe to retry
+
+**8. Output Format**
+
+- **CRUD operations:** JSON output for parsing
+- **Workflow commands:** Human-readable formatted text
+- **Status/balance:** Always displayed at command completion
+
+### Example Agent Workflow
+
+```bash
+# 1. Check status (discover state)
+/botsee
+
+# 2. Setup if needed (requires API key)
+/botsee setup https://example.com --api-key bts_live_abc123
+
+# 3. Run analysis (captures UUID)
+analysis_output=$(/botsee analyze)
+uuid=$(echo "$analysis_output" | grep -oP '(?<=Analysis started: )\S+')
+
+# 4. View results
+/botsee results-competitors "$uuid"
+
+# 5. Generate content
+/botsee content
+
+# 6. Check final balance
+/botsee
+```

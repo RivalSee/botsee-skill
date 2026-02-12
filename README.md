@@ -499,18 +499,172 @@ Next: /botsee analyze
 /botsee results-responses
 ```
 
+## Upgrading from v1.0.0
+
+Version 2.0.0 introduces **breaking changes** to make the skill agent-friendly and non-interactive.
+
+### What Changed
+
+**v1.0.0 (Interactive):**
+```bash
+/botsee setup
+# Then: interactive prompts, feedback loops, regeneration options
+```
+
+**v2.0.0 (Non-Interactive):**
+```bash
+/botsee setup <domain> --api-key <key>
+# All parameters via command-line arguments, no prompts
+```
+
+### Migration Steps
+
+1. **Reconfigure your site:**
+   - Old config files are incompatible
+   - Run `/botsee setup <domain> --api-key <your_key>` to recreate config
+
+2. **Update your workflows:**
+   - Remove any automation that expects interactive prompts
+   - Pass all parameters as command-line arguments
+   - Content auto-saves (no save prompt)
+
+3. **New features:**
+   - `/botsee configure` - Pre-save custom generation counts
+   - `/botsee config-show` - View saved configuration
+   - Results commands now require `<analysis_uuid>` parameter
+
+### Backward Compatibility
+
+❌ **No backward compatibility** - v2.0.0 is a complete redesign. If you need the interactive workflow, stay on v1.0.0.
+
+---
+
+## Configuration Management
+
+### Config Files
+
+**User Config** (`~/.botsee/config.json`)
+- **Purpose:** Stores API key and site UUID
+- **Permissions:** 0o600 (owner read/write only)
+- **Created by:** `/botsee setup` command
+- **Contents:**
+  ```json
+  {
+    "api_key": "bts_live_...",
+    "site_uuid": "abc-def-123"
+  }
+  ```
+
+**Workspace Config** (`.context/botsee-config.json`)
+- **Purpose:** Stores generation defaults (types/personas/questions)
+- **Permissions:** Standard file permissions
+- **Created by:** `/botsee configure` command (optional)
+- **Contents:**
+  ```json
+  {
+    "domain": "https://example.com",
+    "types": 2,
+    "personas_per_type": 2,
+    "questions_per_persona": 5
+  }
+  ```
+
+### Managing Configs
+
+**View current configuration:**
+```bash
+/botsee                    # Show status + API key suffix
+/botsee config-show        # Show workspace config
+```
+
+**Edit configuration:**
+```bash
+# Workspace config (generation counts)
+/botsee configure <domain> --types 3 --personas 3 --questions 10
+
+# User config (API key + site)
+/botsee setup <domain> --api-key <new_key>
+```
+
+**Manual editing:**
+- User config: Edit `~/.botsee/config.json` (must maintain 0o600 permissions)
+- Workspace config: Edit `.context/botsee-config.json`
+
+**Reset configuration:**
+```bash
+rm ~/.botsee/config.json        # Remove user config
+rm .context/botsee-config.json  # Remove workspace config
+/botsee setup <domain>          # Start fresh
+```
+
+---
+
 ## Troubleshooting
 
+### Authentication Issues
+
 **"Invalid API key"**
-- Run `/botsee setup <domain>` to create a new account
-- Or use `--api-key` with a valid key
+- **Cause:** API key expired or incorrect
+- **Solution:** Run `/botsee setup <domain>` to create new account or use `--api-key` with valid key
+- **Check:** API key should start with `bts_live_` or `bts_test_`
+
+**"No BotSee config found"**
+- **Cause:** Missing `~/.botsee/config.json` file
+- **Solution:** Run `/botsee setup <domain>` to initialize configuration
+
+### Credit Issues
 
 **"Insufficient credits"**
-- Add credits at https://botsee.io/billing
+- **Cause:** Account balance too low
+- **Solution:** Add credits at https://botsee.io/billing
+- **Check:** Run `/botsee` to view current balance
+
+**Analysis uses more credits than expected**
+- **Cause:** More questions generated than planned
+- **Check:** Run `/botsee list-questions` to count total questions
+- **Solution:** Reduce question count or delete unnecessary questions
+
+### Connection Issues
 
 **"Connection error"**
-- Check internet connection
-- API calls timeout after 30 seconds
+- **Cause:** Network connectivity or API downtime
+- **Solution:**
+  - Check internet connection
+  - Verify https://botsee.io is accessible
+  - API calls timeout after 30 seconds - retry for transient errors
+
+**"SSL certificate verification failed"**
+- **Cause:** Corporate proxy or outdated CA certificates
+- **Solution:** Update system certificates or check proxy settings
+
+### Setup Issues
+
+**Signup times out**
+- **Cause:** Didn't complete browser signup within 5 minutes
+- **Solution:** Run `/botsee setup <domain>` again to get new signup URL
+
+**"Site creation failed"**
+- **Cause:** Invalid domain format or duplicate site
+- **Solution:**
+  - Ensure domain starts with `https://`
+  - Check `/botsee list-sites` for existing sites
+  - Domain may already be registered to another account
+
+### Analysis Issues
+
+**Analysis takes too long**
+- **Normal:** Analysis can take 5-10 minutes depending on question count
+- **Timeout:** Commands timeout after 10 minutes
+- **Solution:** Reduce number of questions if analysis consistently times out
+
+**"No analysis found"**
+- **Cause:** Haven't run `/botsee analyze` yet
+- **Solution:** Run analysis first, then generate content
+
+**Missing analysis UUID**
+- **Cause:** Analysis UUID not captured from analyze command output
+- **Where to find:** Look for line `📊 Analysis started: abc-def-123`
+- **Solution:** Re-run `/botsee analyze` and copy the UUID from output
 
 ## Credits & Costs
 
@@ -522,14 +676,41 @@ Next: /botsee analyze
 - **Total:** ~75 credits
 
 ### Individual Operations
+
+**Sites:**
 - **Create site:** 5 credits (auto-generates product_name/value_proposition)
-- **Create customer type:** 5 credits
-- **Generate customer types:** 5 credits per type
-- **Create persona:** 5 credits
-- **Generate personas:** 5 credits per persona
-- **Generate questions:** 10 credits per call (generates multiple questions)
-- **Analysis (per run):** ~660 credits (varies by question count and models)
+
+**Customer Types:**
+- **Create customer type (manual):** 5 credits
+- **Generate customer types (AI):** 5 credits **per type** generated
+
+**Personas:**
+- **Create persona (manual):** 5 credits
+- **Generate personas (AI):** 5 credits **per persona** generated
+
+**Questions:**
+- **Create question (manual):** Free
+- **Generate questions (AI):** 10 credits **per API call**
+  - Each call generates multiple questions (default: 5)
+  - Cost is per generation call, **not** per question
+  - Example: Generating 5 questions = 10 credits (one call)
+  - Example: Generating 10 questions for 4 personas = 40 credits (4 calls, one per persona)
+
+**Analysis & Content:**
+- **Analysis (per run):** ~660 credits (varies by question count and AI models used)
 - **Content generation:** 15 credits
+
+### Credit Cost Clarification
+
+**"Per type" vs "Per call":**
+- **Per type/persona:** Each individual resource costs credits
+  - Generate 3 types = 15 credits (3 × 5)
+  - Generate 4 personas = 20 credits (4 × 5)
+
+- **Per call (questions only):** Cost is for the API call, not individual questions
+  - One call generates multiple questions (you specify count: 3-10)
+  - Cost: 10 credits regardless of how many questions generated in that call
+  - Setup calls generate-questions once per persona, so 4 personas = 40 credits (4 calls)
 
 ### Example Workflows
 - **First complete workflow** (setup + analysis + content): ~750 credits
