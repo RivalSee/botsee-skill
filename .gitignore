@@ -1,0 +1,13 @@
+# Test configuration files
+test_config.json
+.botsee/
+
+# macOS
+.DS_Store
+
+# Editor
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
