@@ -1,7 +1,7 @@
 ---
 name: botsee
 description: AI-powered competitive intelligence via BotSee API
-version: 1.0.0
+version: 2.0.0
 ---
 
 # BotSee Skill
@@ -9,10 +9,12 @@ version: 1.0.0
 Get AI-powered competitive intelligence on any website.
 
 Commands:
-- /botsee              - Quick status and help
-- /botsee setup        - Configure API key and site interactively
-- /botsee analyze      - Full competitive analysis
-- /botsee content      - Generate blog post from analysis
+- /botsee                              - Quick status and help
+- /botsee setup <api_key> <domain>     - Setup with defaults (2/2/5)
+- /botsee configure <domain> [t p q]   - Save custom config
+- /botsee config-show                  - Display saved config
+- /botsee analyze                      - Run competitive analysis
+- /botsee content                      - Generate blog post from analysis
 
 <!-- Implementation will be added in next tasks -->
 
@@ -30,7 +32,7 @@ case "$command" in
     if [ ! -f ~/.botsee/config.json ]; then
       echo "🤖 BotSee - AI Competitive Intelligence"
       echo ""
-      echo "Get started: /botsee setup"
+      echo "Get started: /botsee setup <api_key> <domain>"
       echo "Learn more: https://botsee.io/docs"
       exit 0
     fi
@@ -62,29 +64,122 @@ case "$command" in
     echo "🔑 Key: ${key_prefix}..."
     echo ""
     echo "Commands:"
-    echo "  /botsee analyze  - Analyze website"
-    echo "  /botsee content  - Generate blog post"
-    echo "  /botsee setup    - Reconfigure"
+    echo "  /botsee setup <key> <domain>  - Quick setup with defaults"
+    echo "  /botsee configure <domain>    - Custom configuration"
+    echo "  /botsee analyze               - Analyze website"
+    echo "  /botsee content               - Generate blog post"
     ;;
 
-```
-
-  "setup")
-    # /botsee setup - Interactive site configuration
-    echo "🤖 BotSee Setup - Interactive Configuration"
+  "configure")
+    # /botsee configure <domain> [types] [personas] [questions]
+    # Save configuration for later use with /botsee setup
+    echo "🤖 BotSee Configuration"
     echo ""
 
-    # 1. Get API key
-    echo "Get your API key: https://botsee.io/signup"
-    read -sp "Enter API key: " api_key
-    echo ""
+    domain="${2:-}"
+    types="${3:-2}"
+    personas="${4:-2}"
+    questions="${5:-5}"
 
-    if [ -z "$api_key" ]; then
-      echo "❌ API key required"
+    # Validate domain
+    if [ -z "$domain" ]; then
+      echo "❌ Domain required"
+      echo ""
+      echo "Usage: /botsee configure <domain> [types] [personas] [questions]"
+      echo "Example: /botsee configure https://example.com 2 2 5"
       exit 1
     fi
 
-    # Validate and get balance
+    # Add https:// if missing
+    [[ "$domain" =~ ^https?:// ]] || domain="https://$domain"
+
+    # Validate ranges
+    if [ "$types" -lt 1 ] || [ "$types" -gt 3 ]; then
+      echo "❌ Customer types must be 1-3"
+      exit 1
+    fi
+
+    if [ "$personas" -lt 1 ] || [ "$personas" -gt 3 ]; then
+      echo "❌ Personas per type must be 1-3"
+      exit 1
+    fi
+
+    if [ "$questions" -lt 3 ] || [ "$questions" -gt 10 ]; then
+      echo "❌ Questions per persona must be 3-10"
+      exit 1
+    fi
+
+    # Create .context directory if needed
+    mkdir -p .context
+
+    # Save configuration
+    cat > .context/botsee-config.json <<EOF
+{
+  "domain": "$domain",
+  "types": $types,
+  "personas_per_type": $personas,
+  "questions_per_persona": $questions
+}
+EOF
+
+    echo "✅ Configuration saved to .context/botsee-config.json"
+    echo ""
+    echo "Domain: $domain"
+    echo "Customer Types: $types"
+    echo "Personas per Type: $personas"
+    echo "Questions per Persona: $questions"
+    echo ""
+    echo "Next: /botsee setup <api_key>"
+    ;;
+
+  "config-show")
+    # /botsee config-show - Display saved configuration
+    echo "📋 BotSee Configuration"
+    echo "━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+
+    if [ ! -f .context/botsee-config.json ]; then
+      echo "No configuration found."
+      echo ""
+      echo "Create config: /botsee configure <domain> [types] [personas] [questions]"
+      echo "Example: /botsee configure https://example.com 2 2 5"
+      exit 0
+    fi
+
+    domain=$(jq -r '.domain' .context/botsee-config.json)
+    types=$(jq -r '.types' .context/botsee-config.json)
+    personas=$(jq -r '.personas_per_type' .context/botsee-config.json)
+    questions=$(jq -r '.questions_per_persona' .context/botsee-config.json)
+
+    echo "Domain: $domain"
+    echo "Customer Types: $types"
+    echo "Personas per Type: $personas"
+    echo "Questions per Persona: $questions"
+    echo ""
+    echo "Ready to run: /botsee setup <api_key>"
+    ;;
+
+  "setup")
+    # /botsee setup <api_key> [domain] - Non-interactive site configuration
+    echo "🤖 BotSee Setup"
+    echo ""
+
+    # Parse arguments
+    api_key="${2:-}"
+    domain_arg="${3:-}"
+
+    # Validate API key
+    if [ -z "$api_key" ]; then
+      echo "❌ API key required"
+      echo ""
+      echo "Usage: /botsee setup <api_key> <domain>"
+      echo "   or: /botsee setup <api_key>  (uses saved config)"
+      echo ""
+      echo "Get API key: https://botsee.io/signup"
+      exit 1
+    fi
+
+    # Validate API key and get balance
     response=$(curl -s -m 30 -w "\n%{http_code}" \
       -H "Authorization: Bearer $api_key" "https://botsee.io/v1/usage")
     http_code=$(echo "$response" | tail -n1)
@@ -99,6 +194,32 @@ case "$command" in
     echo "✅ API key valid | Balance: $balance credits"
     echo ""
 
+    # Load configuration
+    if [ -n "$domain_arg" ]; then
+      # Use provided domain with defaults
+      domain="$domain_arg"
+      [[ "$domain" =~ ^https?:// ]] || domain="https://$domain"
+      types=2
+      personas=2
+      questions=5
+      echo "Using defaults: $types types, $personas personas/type, $questions questions/persona"
+    elif [ -f .context/botsee-config.json ]; then
+      # Load from saved config
+      domain=$(jq -r '.domain' .context/botsee-config.json)
+      types=$(jq -r '.types' .context/botsee-config.json)
+      personas=$(jq -r '.personas_per_type' .context/botsee-config.json)
+      questions=$(jq -r '.questions_per_persona' .context/botsee-config.json)
+      echo "Loaded config: $types types, $personas personas/type, $questions questions/persona"
+    else
+      echo "❌ No domain provided and no saved config found"
+      echo ""
+      echo "Usage: /botsee setup <api_key> <domain>"
+      echo "   or: /botsee configure <domain> && /botsee setup <api_key>"
+      exit 1
+    fi
+
+    echo ""
+
     # Inline API helper
     api_call() {
       local method="$1" endpoint="$2" data="$3"
@@ -108,115 +229,70 @@ case "$command" in
         ${data:+-d "$data"} "https://botsee.io/v1$endpoint"
     }
 
-    # 2. Get website URL
-    read -p "Website URL to analyze: " url
-    [[ "$url" =~ ^https?:// ]] || url="https://$url"
-
-    echo "⏳ Creating site..."
-    site=$(api_call POST /sites "{\"url\":\"$url\"}")
+    # Create site
+    echo "⏳ Creating site: $domain"
+    site=$(api_call POST /sites "{\"url\":\"$domain\"}")
     site_uuid=$(echo "$site" | jq -r '.site.uuid')
     echo "✅ Site created: $site_uuid"
     echo ""
 
-    # 3. Customer Types - Interactive loop
-    while true; do
-      read -p "How many customer types? (1-3, recommend 2): " ct_count
-      ct_count=${ct_count:-2}
-
-      echo "⏳ Generating $ct_count customer type(s)..."
-      ct=$(api_call POST "/sites/$site_uuid/customer-types/generate" "{\"count\":$ct_count}")
-
-      echo ""
-      echo "📋 Generated Customer Types:"
-      echo "$ct" | jq -r '.customer_types[] | "  - \(.name)"'
-      echo ""
-
-      read -p "Comments or changes? (Enter to continue, 'r' to regenerate): " feedback
-      [ "$feedback" != "r" ] && break
-
-      # Delete and regenerate
-      echo "⏳ Regenerating..."
-      for uuid in $(echo "$ct" | jq -r '.customer_types[].uuid'); do
-        api_call DELETE "/customer-types/$uuid" >/dev/null
-      done
-    done
-
+    # Generate customer types
+    echo "⏳ Generating $types customer type(s)..."
+    ct=$(api_call POST "/sites/$site_uuid/customer-types/generate" "{\"count\":$types}")
     ct_uuids=($(echo "$ct" | jq -r '.customer_types[].uuid'))
-    echo "✅ Locked in ${#ct_uuids[@]} customer type(s)"
+
+    echo "📋 Customer Types:"
+    echo "$ct" | jq -r '.customer_types[] | "  • \(.name)"'
     echo ""
 
-    # 4. Personas - Interactive loop per customer type
+    # Generate personas for each customer type
+    echo "⏳ Generating personas ($personas per type)..."
     all_persona_uuids=()
+    persona_count=0
+
     for ct_uuid in "${ct_uuids[@]}"; do
       ct_name=$(echo "$ct" | jq -r ".customer_types[] | select(.uuid==\"$ct_uuid\") | .name")
 
-      while true; do
-        read -p "Personas for '$ct_name'? (1-3, recommend 2): " p_count
-        p_count=${p_count:-2}
-
-        echo "⏳ Generating $p_count persona(s)..."
-        personas=$(api_call POST "/customer-types/$ct_uuid/personas/generate" "{\"count\":$p_count}")
-
-        echo ""
-        echo "📋 Generated Personas for '$ct_name':"
-        echo "$personas" | jq -r '.personas[] | "  - \(.name): \(.description[:80])..."'
-        echo ""
-
-        read -p "Comments? (Enter to continue, 'r' to regenerate): " feedback
-        [ "$feedback" != "r" ] && break
-
-        # Delete and regenerate
-        for uuid in $(echo "$personas" | jq -r '.personas[].uuid'); do
-          api_call DELETE "/personas/$uuid" >/dev/null
-        done
-      done
-
-      p_uuids=($(echo "$personas" | jq -r '.personas[].uuid'))
+      personas_resp=$(api_call POST "/customer-types/$ct_uuid/personas/generate" "{\"count\":$personas}")
+      p_uuids=($(echo "$personas_resp" | jq -r '.personas[].uuid'))
       all_persona_uuids+=("${p_uuids[@]}")
+      persona_count=$((persona_count + ${#p_uuids[@]}))
+
+      echo "  ✓ $ct_name: ${#p_uuids[@]} persona(s)"
     done
 
-    echo "✅ Locked in ${#all_persona_uuids[@]} persona(s)"
+    echo "✅ Generated $persona_count persona(s)"
     echo ""
 
-    # 5. Questions - Interactive loop per persona
+    # Generate questions for each persona
+    echo "⏳ Generating questions ($questions per persona)..."
+    question_count=0
+
     for p_uuid in "${all_persona_uuids[@]}"; do
-      # Get persona name from previous responses
-      p_name=$(echo "$personas" | jq -r ".personas[] | select(.uuid==\"$p_uuid\") | .name" 2>/dev/null || echo "Persona")
-
-      while true; do
-        read -p "Questions for '$p_name'? (3-10, recommend 5): " q_count
-        q_count=${q_count:-5}
-
-        echo "⏳ Generating $q_count question(s)..."
-        questions=$(api_call POST "/personas/$p_uuid/questions/generate" "{\"count\":$q_count}")
-
-        echo ""
-        echo "📋 Generated Questions:"
-        echo "$questions" | jq -r '.questions[] | "  - \(.question)"'
-        echo ""
-
-        read -p "Comments? (Enter to continue, 'r' to regenerate): " feedback
-        [ "$feedback" != "r" ] && break
-
-        # Delete and regenerate
-        for uuid in $(echo "$questions" | jq -r '.questions[].uuid'); do
-          api_call DELETE "/questions/$uuid" >/dev/null
-        done
-      done
+      questions_resp=$(api_call POST "/personas/$p_uuid/questions/generate" "{\"count\":$questions}")
+      q_count=$(echo "$questions_resp" | jq -r '.questions | length')
+      question_count=$((question_count + q_count))
     done
 
-    # 6. Save configuration
+    echo "✅ Generated $question_count question(s)"
+    echo ""
+
+    # Save configuration
     mkdir -p ~/.botsee && chmod 700 ~/.botsee
     (umask 077; echo "{\"api_key\":\"$api_key\",\"site_uuid\":\"$site_uuid\"}" > ~/.botsee/config.json)
 
-    echo ""
+    # Final summary
     echo "✅ Setup complete!"
-    echo "💰 Balance: $balance credits"
     echo ""
-    echo "Run: /botsee analyze"
+    echo "Generated:"
+    echo "  • $types customer type(s)"
+    echo "  • $persona_count persona(s)"
+    echo "  • $question_count question(s)"
+    echo ""
+    echo "💰 Remaining: $balance credits"
+    echo ""
+    echo "Next: /botsee analyze"
     ;;
-
-```
 
   "analyze")
     # /botsee analyze - Run analysis on pre-configured site
@@ -331,8 +407,6 @@ case "$command" in
     echo "💡 Next: /botsee content"
     ;;
 
-```
-
   "content")
     # /botsee content - Generate blog post from analysis
     echo "🤖 BotSee Content Generator"
@@ -404,23 +478,23 @@ case "$command" in
     echo ""
     echo "💰 Used: $credits credits"
     echo ""
-    read -p "Save to file? (y/n) " save
 
-    if [ "$save" = "y" ]; then
-      filename="botsee-$(date +%Y%m%d-%H%M%S).md"
-      echo "$content" > "$filename"
-      echo "✅ Saved: $filename"
-    fi
+    # Auto-save with timestamp
+    filename="botsee-$(date +%Y%m%d-%H%M%S).md"
+    echo "$content" > "$filename"
+    echo "✅ Saved: $filename"
     ;;
 
   *)
     echo "❌ Unknown command: $command"
     echo ""
     echo "Available commands:"
-    echo "  /botsee          - Status and help"
-    echo "  /botsee setup    - Configure API key"
-    echo "  /botsee analyze  - Run analysis"
-    echo "  /botsee content  - Generate content"
+    echo "  /botsee                        - Status and help"
+    echo "  /botsee setup <key> <domain>   - Quick setup (uses 2/2/5)"
+    echo "  /botsee configure <domain>     - Save custom config"
+    echo "  /botsee config-show            - View saved config"
+    echo "  /botsee analyze                - Run analysis"
+    echo "  /botsee content                - Generate content"
     exit 1
     ;;
 esac
