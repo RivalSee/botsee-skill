@@ -11,11 +11,32 @@ import urllib.request
 import urllib.error
 from pathlib import Path
 
+# API Configuration
 BASE_URL = "https://botsee.io"
+
+# File Paths
 USER_CONFIG = Path.home() / ".botsee" / "config.json"
 WORKSPACE_CONFIG = Path(".context") / "botsee-config.json"
-POLL_INTERVAL = 3
-POLL_TIMEOUT = 300  # 5 minutes
+
+# Polling Configuration
+POLL_INTERVAL = 3  # seconds
+SIGNUP_POLL_TIMEOUT = 300  # 5 minutes
+ANALYSIS_POLL_TIMEOUT = 600  # 10 minutes
+
+# HTTP Status Codes
+HTTP_OK = 200
+HTTP_CREATED = 201
+HTTP_ACCEPTED = 202
+HTTP_NO_CONTENT = 204
+
+# Validation Ranges
+TYPES_MIN, TYPES_MAX = 1, 3
+PERSONAS_MIN, PERSONAS_MAX = 1, 3
+QUESTIONS_MIN, QUESTIONS_MAX = 3, 10
+
+# Display Truncation
+DESC_TRUNCATE_LEN = 50
+TEXT_TRUNCATE_LEN = 80
 
 
 def api_call(method, endpoint, data=None, api_key=None, timeout=30):
@@ -105,6 +126,65 @@ def require_user_config():
     return config
 
 
+# --- Helper Functions ---
+
+
+def is_success(status):
+    """Check if HTTP status code indicates success (2xx)."""
+    return 200 <= status < 300
+
+
+def check_response(resp, status, expected_statuses=None):
+    """Check API response and exit on error."""
+    if expected_statuses is None:
+        expected_statuses = [HTTP_OK, HTTP_CREATED, HTTP_ACCEPTED]
+
+    if status not in expected_statuses:
+        error_msg = resp.get("error", f"Request failed with HTTP {status}")
+        print(f"Error: {error_msg}", file=sys.stderr)
+        sys.exit(1)
+    return resp
+
+
+def poll_until(endpoint, status_key, complete_value, fail_value=None, api_key=None, timeout=300, interval=3):
+    """
+    Poll an endpoint until a condition is met.
+
+    Args:
+        endpoint: API endpoint to poll
+        status_key: Key in response to check (e.g., "status")
+        complete_value: Value indicating completion (e.g., "completed")
+        fail_value: Value indicating failure (optional)
+        api_key: API key for authentication
+        timeout: Maximum time to poll in seconds
+        interval: Time between polls in seconds
+
+    Returns:
+        Response dict when complete
+
+    Raises:
+        SystemExit on timeout or failure
+    """
+    elapsed = 0
+    while elapsed < timeout:
+        time.sleep(interval)
+        elapsed += interval
+
+        resp, status = api_call("GET", endpoint, api_key=api_key)
+        if status != HTTP_OK:
+            continue
+
+        value = resp.get(status_key)
+        if value == complete_value:
+            return resp
+        if fail_value and value == fail_value:
+            print(f"Operation failed: {value}", file=sys.stderr)
+            sys.exit(1)
+
+    print(f"Operation timed out after {timeout} seconds", file=sys.stderr)
+    sys.exit(1)
+
+
 # --- High-level workflow commands ---
 
 
@@ -119,7 +199,7 @@ def cmd_status(_args):
         return
 
     resp, status = api_call("GET", "/usage", api_key=config["api_key"])
-    if status != 200:
+    if status != HTTP_OK:
         print(f"API error ({status}). Run: /botsee setup <domain>", file=sys.stderr)
         sys.exit(1)
 
@@ -152,7 +232,7 @@ def cmd_setup(args):
         # Existing user flow
         api_key = args.api_key
         resp, status = api_call("POST", "/auth/validate", api_key=api_key)
-        if status != 200:
+        if status != HTTP_OK:
             print(f"Invalid API key (HTTP {status})", file=sys.stderr)
             sys.exit(1)
         balance = resp.get("balance", "?")
@@ -162,7 +242,7 @@ def cmd_setup(args):
         print("🤖 BotSee Setup")
         print("")
         resp, status = api_call("POST", "/signup", data={"domain": domain})
-        if status not in (200, 201):
+        if not is_success(status):
             print(f"Signup failed (HTTP {status}): {resp}", file=sys.stderr)
             sys.exit(1)
 
@@ -178,15 +258,15 @@ def cmd_setup(args):
         print(f"")
         print(f"⏳ Waiting for signup completion...")
 
-        # Poll for completion
+        # Poll for signup completion
         elapsed = 0
         api_key = None
-        while elapsed < POLL_TIMEOUT:
+        while elapsed < SIGNUP_POLL_TIMEOUT:
             time.sleep(POLL_INTERVAL)
             elapsed += POLL_INTERVAL
 
             poll_resp, poll_status = api_call("GET", f"/signup/{token}/status")
-            if poll_status != 200:
+            if poll_status != HTTP_OK:
                 continue
 
             signup_status = poll_resp.get("status")
@@ -198,7 +278,7 @@ def cmd_setup(args):
                 sys.exit(1)
 
         if not api_key:
-            print("Signup timed out. Run /botsee setup again.", file=sys.stderr)
+            print(f"Signup timed out after {SIGNUP_POLL_TIMEOUT} seconds. Run /botsee setup again.", file=sys.stderr)
             sys.exit(1)
 
         print(f"✅ Signup complete!")
@@ -295,14 +375,14 @@ def cmd_configure(args):
     questions = args.questions
 
     # Validate ranges
-    if not (1 <= types <= 3):
-        print("Error: types must be between 1 and 3", file=sys.stderr)
+    if not (TYPES_MIN <= types <= TYPES_MAX):
+        print(f"Error: types must be between {TYPES_MIN} and {TYPES_MAX}", file=sys.stderr)
         sys.exit(1)
-    if not (1 <= personas <= 3):
-        print("Error: personas must be between 1 and 3", file=sys.stderr)
+    if not (PERSONAS_MIN <= personas <= PERSONAS_MAX):
+        print(f"Error: personas must be between {PERSONAS_MIN} and {PERSONAS_MAX}", file=sys.stderr)
         sys.exit(1)
-    if not (3 <= questions <= 10):
-        print("Error: questions must be between 3 and 10", file=sys.stderr)
+    if not (QUESTIONS_MIN <= questions <= QUESTIONS_MAX):
+        print(f"Error: questions must be between {QUESTIONS_MIN} and {QUESTIONS_MAX}", file=sys.stderr)
         sys.exit(1)
 
     save_workspace_config(domain, types, personas, questions)
