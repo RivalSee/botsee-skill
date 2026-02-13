@@ -81,14 +81,32 @@ def load_user_config():
         return json.load(f)
 
 
-def save_user_config(api_key, site_uuid):
+def save_user_config(api_key, site_uuid, contact_email=None, company_name=None):
     """Save user config to ~/.botsee/config.json with secure permissions."""
     USER_CONFIG.parent.mkdir(parents=True, exist_ok=True)
+
+    # Read existing config to preserve fields
+    existing_config = {}
+    if USER_CONFIG.exists():
+        try:
+            with open(USER_CONFIG) as f:
+                existing_config = json.load(f)
+        except (json.JSONDecodeError, IOError):
+            pass
+
+    # Build new config, preserving existing values if new ones not provided
+    config = {
+        "api_key": api_key,
+        "site_uuid": site_uuid,
+        "contact_email": contact_email or existing_config.get("contact_email"),
+        "company_name": company_name or existing_config.get("company_name")
+    }
+
     # Set umask to ensure file is created with secure permissions (no race window)
     old_umask = os.umask(0o077)  # Only owner can read/write
     try:
         with open(USER_CONFIG, "w") as f:
-            json.dump({"api_key": api_key, "site_uuid": site_uuid}, f, indent=2)
+            json.dump(config, f, indent=2)
     finally:
         os.umask(old_umask)  # Restore original umask
     os.chmod(USER_CONFIG.parent, 0o700)
@@ -182,8 +200,17 @@ def cmd_status(_args):
 
     # Show only last 4 characters of API key for security
     key_suffix = config["api_key"][-4:] if len(config["api_key"]) >= 4 else "****"
+
+    # Get email from config or API response
+    email = config.get("contact_email") or resp.get('email', resp.get('user_email', resp.get('account_email')))
+    company = config.get("company_name")
+
     print("🤖 BotSee")
     print("━━━━━━━━━━━━━━━")
+    if email:
+        print(f"📧 Email: {email}")
+    if company:
+        print(f"🏢 Company: {company}")
     print(f"💰 Credits: {resp.get('balance', '?')}")
     print(f"🌐 Sites: {resp.get('sites_count', 0)}")
     if active_site:
@@ -235,9 +262,11 @@ def signup_resume(pending_signup_path):
         signup_status = poll_resp.get("status")
         if signup_status == "completed":
             api_key = poll_resp.get("api_key")
+            contact_email = poll_resp.get("contact_email")
+            company_name = poll_resp.get("company_name")
             if api_key:
-                # Save API key and clean up pending signup
-                save_user_config(api_key, None)
+                # Save API key and account info, clean up pending signup
+                save_user_config(api_key, None, contact_email, company_name)
                 os.remove(pending_signup_path)
 
                 print(f"✅ Signup complete!")
