@@ -474,15 +474,19 @@ def cmd_analyze(args):
     print("⏳ Processing (this may take a few minutes)...")
 
     # Poll for completion with exponential backoff
-    elapsed = 0
     wait_time = 1  # Start with 1 second
     max_wait = 30  # Cap at 30 seconds
+    start_time = time.time()
 
-    while elapsed < ANALYSIS_POLL_TIMEOUT:
-        # Check immediately on first iteration, then wait
+    while True:
+        elapsed = time.time() - start_time
+        if elapsed >= ANALYSIS_POLL_TIMEOUT:
+            print("Analysis timed out.", file=sys.stderr)
+            sys.exit(1)
+
+        # Check status immediately on first iteration, then wait before subsequent checks
         if elapsed > 0:
             time.sleep(wait_time)
-            elapsed += wait_time
             # Exponential backoff: 1s → 2s → 4s → 8s → ... → max 30s
             wait_time = min(wait_time * 2, max_wait)
 
@@ -498,9 +502,6 @@ def cmd_analyze(args):
         elif analysis_status == "failed":
             print("Analysis failed.", file=sys.stderr)
             sys.exit(1)
-    else:
-        print("Analysis timed out.", file=sys.stderr)
-        sys.exit(1)
 
     # Fetch results
     comp_resp, _ = api_call("GET", f"/analysis/{analysis_uuid}/competitors", api_key=api_key)
