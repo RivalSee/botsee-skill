@@ -194,14 +194,22 @@ def cmd_status(_args):
     if not config:
         print("🤖 BotSee - AI Competitive Intelligence")
         print("")
-        print("Get started: /botsee setup <domain>")
+        print("Get started: /botsee signup")
         print("Learn more: https://botsee.io/docs")
         return
 
     resp, status = api_call("GET", "/usage", api_key=config["api_key"])
     if status != HTTP_OK:
-        print(f"API error ({status}). Run: /botsee setup <domain>", file=sys.stderr)
+        print(f"API error ({status}). Run: /botsee signup", file=sys.stderr)
         sys.exit(1)
+
+    # Get active site details if available
+    active_site = None
+    site_uuid = config.get("site_uuid")
+    if site_uuid:
+        site_resp, site_status = api_call("GET", f"/sites/{site_uuid}", api_key=config["api_key"])
+        if site_status == HTTP_OK:
+            active_site = site_resp.get("site", {})
 
     # Show only last 4 characters of API key for security
     key_suffix = config["api_key"][-4:] if len(config["api_key"]) >= 4 else "****"
@@ -209,85 +217,193 @@ def cmd_status(_args):
     print("━━━━━━━━━━━━━━━")
     print(f"💰 Credits: {resp.get('balance', '?')}")
     print(f"🌐 Sites: {resp.get('sites_count', 0)}")
+    if active_site:
+        site_url = active_site.get("url", "?")
+        site_name = active_site.get("product_name", "?")
+        print(f"📍 Active: {site_name} ({site_url})")
     print(f"🔑 Key: ...{key_suffix}")
     print("")
     print("Commands:")
-    print("  /botsee setup <domain>        - Setup new site")
-    print("  /botsee configure <domain>    - Custom configuration")
+    print("  /botsee signup                - Get API key")
+    print("  /botsee create-site <domain>  - Create site")
     print("  /botsee analyze               - Analyze website")
     print("  /botsee content               - Generate blog post")
 
 
-def cmd_setup(args):
-    """Setup BotSee: signup (new users) or validate key (existing users)."""
-    domain = normalize_domain(args.domain)
-
-    # Load generation counts from workspace config or defaults
-    ws_config = load_workspace_config()
-    types = ws_config["types"] if ws_config else 2
-    personas = ws_config["personas_per_type"] if ws_config else 2
-    questions = ws_config["questions_per_persona"] if ws_config else 5
-
+def cmd_signup(args):
+    """Signup for BotSee: create account (new users) or validate key (existing users)."""
     if args.api_key:
-        # Existing user flow
+        # Existing user flow - validate and save API key
         api_key = args.api_key
         resp, status = api_call("POST", "/auth/validate", api_key=api_key)
         if status != HTTP_OK:
             print(f"Invalid API key (HTTP {status})", file=sys.stderr)
             sys.exit(1)
         balance = resp.get("balance", "?")
+
+        # Save API key to config
+        save_user_config(api_key, None)
+
         print(f"✅ API key valid | Balance: {balance} credits")
-    else:
-        # New user flow: create signup token
-        print("🤖 BotSee Setup")
         print("")
-        resp, status = api_call("POST", "/signup", data={"domain": domain})
-        if not is_success(status):
-            print(f"Signup failed (HTTP {status}): {resp}", file=sys.stderr)
-            sys.exit(1)
+        print(f"Next: /botsee create-site <domain>")
+        return
 
-        token = resp.get("token")
-        setup_url = resp.get("setup_url")
-        if not token or not setup_url:
-            print(f"Unexpected signup response: {resp}", file=sys.stderr)
-            sys.exit(1)
+    # Check if there's a pending signup to complete
+    pending_signup_path = os.path.join(os.path.expanduser("~/.botsee"), "pending_signup.json")
+    if os.path.exists(pending_signup_path):
+        # Resume pending signup
+        print("🤖 BotSee Signup")
+        print("")
+        print("⏳ Checking signup status...")
 
-        print(f"📋 Complete signup to get your API key:")
-        print(f"")
-        print(f"   {setup_url}")
-        print(f"")
-        print(f"⏳ Waiting for signup completion...")
+        with open(pending_signup_path, "r") as f:
+            pending = json.load(f)
 
-        # Poll for signup completion
-        elapsed = 0
-        api_key = None
-        while elapsed < SIGNUP_POLL_TIMEOUT:
-            time.sleep(POLL_INTERVAL)
-            elapsed += POLL_INTERVAL
+        status_url = pending.get("status_url")
+        setup_token = pending.get("setup_token")
 
-            poll_resp, poll_status = api_call("GET", f"/signup/{token}/status")
-            if poll_status != HTTP_OK:
-                continue
+        # Check status once
+        poll_url = status_url if status_url else f"/signup/{setup_token}/status"
+        poll_resp, poll_status = api_call("GET", poll_url)
 
+        if poll_status == HTTP_OK:
             signup_status = poll_resp.get("status")
             if signup_status == "completed":
                 api_key = poll_resp.get("api_key")
-                break
+                if api_key:
+                    # Save API key and clean up pending signup
+                    save_user_config(api_key, None)
+                    os.remove(pending_signup_path)
+
+                    print(f"✅ Signup complete!")
+                    print("")
+                    print(f"Next: /botsee create-site <domain>")
+                    return
             elif signup_status == "expired":
-                print("Signup token expired. Run /botsee setup again.", file=sys.stderr)
+                os.remove(pending_signup_path)
+                print("Signup token expired. Run /botsee signup again.", file=sys.stderr)
                 sys.exit(1)
 
-        if not api_key:
-            print(f"Signup timed out after {SIGNUP_POLL_TIMEOUT} seconds. Run /botsee setup again.", file=sys.stderr)
+        # Still pending
+        setup_url = pending.get("setup_url")
+        print(f"📋 Signup not yet complete. Please visit:")
+        print(f"")
+        print(f"   {setup_url}")
+        print(f"")
+        print("Once you've completed signup, run /botsee signup again to save your API key.")
+        sys.exit(0)
+
+    # New signup - create token
+    # Build signup data with optional contact fields
+    signup_data = {}
+    if args.email:
+        signup_data["contact_email"] = args.email
+    if args.name:
+        signup_data["contact_name"] = args.name
+    if args.company:
+        signup_data["company_name"] = args.company
+
+    # Call signup API (contact fields are optional)
+    resp, status = api_call("POST", "/signup", data=signup_data)
+    if not is_success(status):
+        print(f"Signup failed (HTTP {status}): {resp}", file=sys.stderr)
+        sys.exit(1)
+
+    # Parse response - API returns setup_token, not token
+    setup_token = resp.get("setup_token")
+    setup_url = resp.get("setup_url")
+    status_url = resp.get("status_url")  # API provides this
+
+    if not setup_token or not setup_url:
+        print(f"Unexpected signup response: {resp}", file=sys.stderr)
+        sys.exit(1)
+
+    # Show URL prominently
+    print(f"")
+    print(f"Complete signup: {setup_url}")
+    print(f"")
+
+    # Wait for user to complete signup
+    try:
+        input("Press Enter when done...")
+    except (EOFError, KeyboardInterrupt):
+        # Non-interactive mode or user cancelled - save pending signup and exit
+        os.makedirs(os.path.dirname(pending_signup_path), exist_ok=True)
+        with open(pending_signup_path, "w") as f:
+            json.dump({
+                "setup_token": setup_token,
+                "setup_url": setup_url,
+                "status_url": status_url
+            }, f, indent=2)
+        print("")
+        print("Run /botsee signup again after completing signup to save your API key.")
+        return
+
+    print("")
+    print("⏳ Checking signup status...")
+
+    # Check status
+    poll_url = status_url if status_url else f"/signup/{setup_token}/status"
+    poll_resp, poll_status = api_call("GET", poll_url)
+
+    if poll_status == HTTP_OK:
+        signup_status = poll_resp.get("status")
+        if signup_status == "completed":
+            api_key = poll_resp.get("api_key")
+            if api_key:
+                # Save API key
+                save_user_config(api_key, None)
+                print(f"✅ Signup complete!")
+                print("")
+                print(f"Next: /botsee create-site <domain>")
+                return
+        elif signup_status == "expired":
+            print("Signup token expired. Run /botsee signup again.", file=sys.stderr)
             sys.exit(1)
 
-        print(f"✅ Signup complete!")
-        print("")
+    # Still pending - save for later
+    os.makedirs(os.path.dirname(pending_signup_path), exist_ok=True)
+    with open(pending_signup_path, "w") as f:
+        json.dump({
+            "setup_token": setup_token,
+            "setup_url": setup_url,
+            "status_url": status_url
+        }, f, indent=2)
+    print(f"Signup not yet complete. Please complete it at:")
+    print(f"   {setup_url}")
+    print("")
+    print("Then run /botsee signup again to save your API key.")
 
-    # Site creation + generation
+
+def cmd_create_site(args):
+    """Create site and generate content."""
+    # Require user config (API key must exist from signup)
+    config = require_user_config()
+    api_key = config.get("api_key")
+
+    domain = normalize_domain(args.domain)
+    types = args.types
+    personas = args.personas
+    questions = args.questions
+
+    # Validate ranges
+    if not (TYPES_MIN <= types <= TYPES_MAX):
+        print(f"Error: types must be between {TYPES_MIN} and {TYPES_MAX}", file=sys.stderr)
+        sys.exit(1)
+    if not (PERSONAS_MIN <= personas <= PERSONAS_MAX):
+        print(f"Error: personas must be between {PERSONAS_MIN} and {PERSONAS_MAX}", file=sys.stderr)
+        sys.exit(1)
+    if not (QUESTIONS_MIN <= questions <= QUESTIONS_MAX):
+        print(f"Error: questions must be between {QUESTIONS_MIN} and {QUESTIONS_MAX}", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"🤖 BotSee Configuration")
+    print("")
     print(f"Using: {types} types, {personas} personas/type, {questions} questions/persona")
     print("")
 
+    # Create site
     print(f"⏳ Creating site: {domain}")
     resp, status = api_call("POST", "/sites", data={"url": domain}, api_key=api_key)
     if status not in (200, 201):
@@ -348,14 +464,15 @@ def cmd_setup(args):
     print(f"✅ Generated {total_questions} question(s)")
     print("")
 
-    # Save config
+    # Save configs
     save_user_config(api_key, site_uuid)
+    save_workspace_config(domain, types, personas, questions)
 
     # Re-fetch balance
     usage_resp, _ = api_call("GET", "/usage", api_key=api_key)
     balance = usage_resp.get("balance", "?")
 
-    print("✅ Setup complete!")
+    print("✅ Configuration complete!")
     print("")
     print("Generated:")
     print(f"  • {len(ct_list)} customer type(s)")
@@ -364,44 +481,20 @@ def cmd_setup(args):
     print("")
     print(f"💰 Remaining: {balance} credits")
     print("")
-    print("Next: /botsee analyze")
-
-
-def cmd_configure(args):
-    """Save workspace configuration for later use with setup."""
-    domain = normalize_domain(args.domain)
-    types = args.types
-    personas = args.personas
-    questions = args.questions
-
-    # Validate ranges
-    if not (TYPES_MIN <= types <= TYPES_MAX):
-        print(f"Error: types must be between {TYPES_MIN} and {TYPES_MAX}", file=sys.stderr)
-        sys.exit(1)
-    if not (PERSONAS_MIN <= personas <= PERSONAS_MAX):
-        print(f"Error: personas must be between {PERSONAS_MIN} and {PERSONAS_MAX}", file=sys.stderr)
-        sys.exit(1)
-    if not (QUESTIONS_MIN <= questions <= QUESTIONS_MAX):
-        print(f"Error: questions must be between {QUESTIONS_MIN} and {QUESTIONS_MAX}", file=sys.stderr)
-        sys.exit(1)
-
-    save_workspace_config(domain, types, personas, questions)
-
-    print(f"✅ Configuration saved to {WORKSPACE_CONFIG}")
+    print("Next steps:")
+    print("  /botsee analyze           - Run competitive analysis")
     print("")
-    print(f"  Domain: {domain}")
-    print(f"  Customer Types: {types}")
-    print(f"  Personas per Type: {personas}")
-    print(f"  Questions per Persona: {questions}")
-    print("")
-    print("Next: /botsee setup <domain>  or  /botsee setup <domain> --api-key <key>")
+    print("View your content:")
+    print("  /botsee list-types        - View customer types")
+    print("  /botsee list-personas     - View all personas")
+    print("  /botsee get-site          - View site details")
 
 
 def cmd_config_show(_args):
     """Display saved workspace configuration."""
     config = load_workspace_config()
     if not config:
-        print("No workspace config found. Run: /botsee configure <domain>")
+        print("No workspace config found. Run: /botsee create-site <domain>")
         return
 
     print("📋 BotSee Configuration")
@@ -411,14 +504,16 @@ def cmd_config_show(_args):
     print(f"Personas per Type: {config.get('personas_per_type', '?')}")
     print(f"Questions per Persona: {config.get('questions_per_persona', '?')}")
     print("")
-    print("Ready to run: /botsee setup <domain>")
+    print("This configuration was used when creating the site.")
 
 
-def cmd_analyze(_args):
+def cmd_analyze(args):
     """Run competitive analysis on configured site."""
     config = require_user_config()
     api_key = config["api_key"]
-    site_uuid = config["site_uuid"]
+
+    # Use provided site_uuid or fall back to config
+    site_uuid = args.site_uuid if hasattr(args, 'site_uuid') and args.site_uuid else config.get("site_uuid")
 
     print("🤖 BotSee Analysis")
     print("━━━━━━━━━━━━━━━━━━")
@@ -426,7 +521,7 @@ def cmd_analyze(_args):
 
     # Start analysis
     print("⏳ Starting analysis...")
-    resp, status = api_call("POST", "/analysis", data={}, api_key=api_key)
+    resp, status = api_call("POST", "/analysis", data={"site_uuid": site_uuid}, api_key=api_key)
     if status not in (200, 201, 202):
         print(f"Analysis failed (HTTP {status}): {resp}", file=sys.stderr)
         sys.exit(1)
@@ -466,15 +561,31 @@ def cmd_analyze(_args):
     kw_resp, _ = api_call("GET", f"/analysis/{analysis_uuid}/keywords", api_key=api_key)
     src_resp, _ = api_call("GET", f"/analysis/{analysis_uuid}/sources", api_key=api_key)
 
-    # Display competitors
-    competitors = comp_resp.get("competitors", [])[:10]
-    if competitors:
-        print("📊 Top Competitors:")
-        for c in competitors:
-            rank = c.get("rank", "?")
-            name = c.get("company_name", "?")
-            mentions = c.get("mentions", 0)
-            print(f"  {rank}. {name} - {mentions} mentions")
+    # Display competitors by customer type
+    by_customer_type = comp_resp.get("by_customer_type", [])
+    overall_summary = comp_resp.get("overall_summary", {})
+
+    if by_customer_type:
+        print("📊 Competitors by Customer Type:")
+        print("")
+        for group in by_customer_type:
+            customer_type_name = group.get("customer_type_name", "Unknown")
+            competitors = group.get("competitors", [])[:5]  # Top 5 per type
+
+            if competitors:
+                print(f"  {customer_type_name}:")
+                for c in competitors:
+                    name = c.get("name", "?")
+                    appearance = c.get("appearance_percentage", 0)
+                    avg_rank = c.get("avg_rank", "?")
+                    mentions = c.get("mentions", 0)
+                    print(f"    • {name} - {appearance:.0f}% appearance, avg rank {avg_rank}, {mentions} mentions")
+                print("")
+
+        # Show overall summary
+        total_competitors = overall_summary.get("total_unique_competitors", 0)
+        total_responses = overall_summary.get("total_responses_analyzed", 0)
+        print(f"  Total: {total_competitors} unique competitors across {total_responses} responses")
         print("")
 
     # Display keywords
@@ -565,12 +676,15 @@ def cmd_list_sites(_args):
         print("No sites found.")
         return
 
+    active_uuid = config.get("site_uuid")
+
     print(f"Sites ({len(sites)}):")
     for s in sites:
         uuid = s.get("uuid", "?")
         url = s.get("url", "?")
         name = s.get("product_name", "?")
-        print(f"  {uuid[:8]}... - {url} ({name})")
+        active_marker = " ⭐" if uuid == active_uuid else ""
+        print(f"  {uuid[:8]}... - {url} ({name}){active_marker}")
 
 
 def cmd_get_site(args):
@@ -585,21 +699,6 @@ def cmd_get_site(args):
     print(json.dumps(site, indent=2))
 
 
-def cmd_create_site(args):
-    """Create a site manually."""
-    config = require_user_config()
-    domain = normalize_domain(args.url)
-    resp, status = api_call("POST", "/sites", data={"url": domain}, api_key=config["api_key"])
-    if status not in (200, 201):
-        print(f"Failed (HTTP {status}): {resp}", file=sys.stderr)
-        sys.exit(1)
-
-    site = resp.get("site", {})
-    uuid = site.get("uuid", "?")
-    print(f"✅ Site created: {uuid}")
-    print(json.dumps(site, indent=2))
-
-
 def cmd_archive_site(args):
     """Archive (soft-delete) a site."""
     config = require_user_config()
@@ -609,6 +708,30 @@ def cmd_archive_site(args):
     else:
         print(f"Failed (HTTP {status}): {resp}", file=sys.stderr)
         sys.exit(1)
+
+
+def cmd_use_site(args):
+    """Switch active site."""
+    config = require_user_config()
+    api_key = config["api_key"]
+    site_uuid = args.uuid
+
+    # Verify site exists
+    resp, status = api_call("GET", f"/sites/{site_uuid}", api_key=api_key)
+    if status != 200:
+        print(f"Failed to fetch site (HTTP {status}): {resp}", file=sys.stderr)
+        sys.exit(1)
+
+    site = resp.get("site", {})
+    site_url = site.get("url", "?")
+    site_name = site.get("product_name", "?")
+
+    # Update config with new active site
+    save_user_config(api_key, site_uuid)
+
+    print(f"✅ Active site changed to: {site_name}")
+    print(f"   URL: {site_url}")
+    print(f"   UUID: {site_uuid}")
 
 
 # --- Customer Types CRUD ---
@@ -946,8 +1069,8 @@ def cmd_results_competitors(args):
         print(f"Failed (HTTP {status}): {resp}", file=sys.stderr)
         sys.exit(1)
 
-    competitors = resp.get("competitors", [])
-    print(json.dumps(competitors, indent=2))
+    # Return full response with by_customer_type and overall_summary
+    print(json.dumps(resp, indent=2))
 
 
 def cmd_results_keywords(args):
@@ -1007,18 +1130,23 @@ def main():
     # High-level workflow commands
     subparsers.add_parser("status", help="Show account status and balance")
 
-    setup_parser = subparsers.add_parser("setup", help="Setup BotSee for a domain")
-    setup_parser.add_argument("domain", help="Website URL to analyze")
-    setup_parser.add_argument("--api-key", help="Existing API key (skip signup)")
+    signup_parser = subparsers.add_parser("signup", help="Signup for BotSee and get API key")
+    signup_parser.add_argument("--api-key", help="Existing API key (skip signup)")
+    signup_parser.add_argument("--email", help="Contact email (optional)")
+    signup_parser.add_argument("--name", help="Contact name (optional)")
+    signup_parser.add_argument("--company", help="Company name (optional)")
 
-    config_parser = subparsers.add_parser("configure", help="Save workspace configuration")
-    config_parser.add_argument("domain", help="Website URL")
-    config_parser.add_argument("--types", type=int, default=2, help="Customer types (1-3, default: 2)")
-    config_parser.add_argument("--personas", type=int, default=2, help="Personas per type (1-3, default: 2)")
-    config_parser.add_argument("--questions", type=int, default=5, help="Questions per persona (3-10, default: 5)")
+    create_site_parser = subparsers.add_parser("create-site", help="Create site and generate content")
+    create_site_parser.add_argument("domain", help="Website URL to analyze")
+    create_site_parser.add_argument("--types", type=int, default=2, help="Number of customer types (default: 2)")
+    create_site_parser.add_argument("--personas", type=int, default=2, help="Personas per customer type (default: 2)")
+    create_site_parser.add_argument("--questions", type=int, default=5, help="Questions per persona (default: 5)")
 
     subparsers.add_parser("config-show", help="Display saved configuration")
-    subparsers.add_parser("analyze", help="Run competitive analysis")
+
+    analyze_parser = subparsers.add_parser("analyze", help="Run competitive analysis")
+    analyze_parser.add_argument("site_uuid", nargs="?", help="Site UUID (optional, defaults to active site)")
+
     subparsers.add_parser("content", help="Generate blog post from analysis")
 
     # Sites CRUD
@@ -1026,11 +1154,11 @@ def main():
     get_site_parser = subparsers.add_parser("get-site", help="Get site by UUID")
     get_site_parser.add_argument("uuid", help="Site UUID")
 
-    create_site_parser = subparsers.add_parser("create-site", help="Create a site")
-    create_site_parser.add_argument("url", help="Website URL")
-
     archive_site_parser = subparsers.add_parser("archive-site", help="Archive a site")
     archive_site_parser.add_argument("uuid", help="Site UUID")
+
+    use_site_parser = subparsers.add_parser("use-site", help="Switch active site")
+    use_site_parser.add_argument("uuid", help="Site UUID")
 
     # Customer Types CRUD
     list_types_parser = subparsers.add_parser("list-types", help="List customer types")
@@ -1119,15 +1247,15 @@ def main():
 
     commands = {
         "status": cmd_status,
-        "setup": cmd_setup,
-        "configure": cmd_configure,
+        "signup": cmd_signup,
+        "create-site": cmd_create_site,
         "config-show": cmd_config_show,
         "analyze": cmd_analyze,
         "content": cmd_content,
         "list-sites": cmd_list_sites,
         "get-site": cmd_get_site,
-        "create-site": cmd_create_site,
         "archive-site": cmd_archive_site,
+        "use-site": cmd_use_site,
         "list-types": cmd_list_types,
         "get-type": cmd_get_type,
         "create-type": cmd_create_type,

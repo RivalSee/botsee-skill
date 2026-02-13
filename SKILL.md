@@ -13,7 +13,7 @@ Commands:
 **Workflow:**
 - /botsee                                  - Quick status and help
 - /botsee setup <domain> [--api-key KEY]   - Setup (creates account for new users)
-- /botsee configure <domain> [--types N]   - Save custom config
+- /botsee create-site <domain> [--types N]   - Save custom config
 - /botsee config-show                      - Display saved config
 - /botsee analyze                          - Run competitive analysis
 - /botsee content                          - Generate blog post from analysis
@@ -64,44 +64,84 @@ When user invokes a BotSee command, run the corresponding Python script. All com
 python3 ~/.claude/skills/botsee/scripts/botsee.py status
 ```
 
-### /botsee setup <domain> [--api-key KEY]
+### /botsee signup [--email EMAIL] [--name NAME] [--company COMPANY] [--api-key KEY]
 
-New user (no API key — creates signup token, shows URL, waits for completion):
+**New user signup flow:**
 
+**Step 1: Get signup URL**
 ```bash
-python3 ~/.claude/skills/botsee/scripts/botsee.py setup <domain>
+python3 ~/.claude/skills/botsee/scripts/botsee.py signup
 ```
 
-**What happens:**
-1. Creates a signup token via BotSee API
-2. Displays signup URL for browser completion
-3. Polls for signup completion (5 minute timeout)
-4. Proceeds with site setup once API key is obtained
+This displays a signup URL. Tell the user: "Visit this URL to complete signup and get your API key. Then paste your API key here."
+
+**Step 2: User pastes API key in conversation**
+
+When the user provides their API key (e.g., "Here's my API key: bts_live_abc123"), extract it and save it:
+
+```bash
+python3 ~/.claude/skills/botsee/scripts/botsee.py signup --api-key <extracted-key>
+```
+
+**Step 3: User runs create-site**
+
+After saving the API key, the user can run:
+```bash
+python3 ~/.claude/skills/botsee/scripts/botsee.py create-site <domain>
+```
+
+**IMPORTANT: Agent behavior when user pastes API key**
+
+When you detect a BotSee API key in the conversation (format: `bts_live_*` or `bts_test_*`):
+1. Automatically run `signup --api-key <key>` to save it
+2. Confirm to the user: "✅ API key saved! You can now run /botsee create-site <domain>"
+3. Do NOT ask the user to manually run the signup command with the key
+
+**Example conversation:**
+```
+User: /botsee signup
+Assistant: [runs signup, gets URL] "Visit https://botsee.io/setup/TOKEN to complete signup. Paste your API key here when you get it."
+
+User: "Here's my API key: bts_live_abc123def456"
+Assistant: [automatically runs: signup --api-key bts_live_abc123def456]
+         "✅ API key saved! Run /botsee create-site <your-domain> to set up your site."
+
+User: /botsee create-site https://example.com
+Assistant: [runs create-site, which uses saved API key]
+```
 
 Existing user (has API key):
 
 ```bash
-python3 ~/.claude/skills/botsee/scripts/botsee.py setup <domain> --api-key <key>
+python3 ~/.claude/skills/botsee/scripts/botsee.py signup --api-key <key>
 ```
 
 **What happens:**
 1. Validates API key
-2. Creates site for the domain
-3. Generates customer types, personas, and questions based on saved config or defaults (2/2/5)
-4. Saves credentials to `~/.botsee/config.json`
+2. Saves API key to `~/.botsee/config.json`
 
-### /botsee configure <domain> [--types T] [--personas P] [--questions Q]
+### /botsee create-site <domain> [--types T] [--personas P] [--questions Q]
+
+**Requires:** API key from `/botsee signup`
 
 ```bash
-python3 ~/.claude/skills/botsee/scripts/botsee.py configure <domain> --types <t> --personas <p> --questions <q>
+python3 ~/.claude/skills/botsee/scripts/botsee.py create-site <domain>
 ```
 
-**All parameters are optional flags:**
+**Optional parameters:**
 - `--types` (default: 2, range: 1-3)
 - `--personas` (default: 2, range: 1-3)
 - `--questions` (default: 5, range: 3-10)
 
-Saves to `.context/botsee-config.json`. Used by `/botsee setup` command.
+**What happens:**
+1. Creates a site for the domain
+2. Generates customer types, personas, and questions
+3. Saves configuration to workspace and user config
+
+**Customize generation counts:**
+```bash
+python3 ~/.claude/skills/botsee/scripts/botsee.py create-site <domain> --types 3 --personas 2 --questions 10
+```
 
 ### /botsee config-show
 

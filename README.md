@@ -22,11 +22,19 @@ Restart Claude Code or reload skills.
 ## Quick Start
 
 ```bash
-# New user — creates account, shows signup URL
-/botsee setup https://example.com
+# Step 1: Get signup URL
+/botsee signup
 
-# Existing user — use your API key
-/botsee setup https://example.com --api-key bts_live_YOUR_KEY
+# Step 2: Visit the URL in browser, complete signup
+
+# Step 3: Paste your API key in the chat
+# Claude will automatically save it
+
+# Step 4: Create site and generate content
+/botsee create-site https://example.com
+
+# Optional: Customize generation counts
+/botsee create-site https://example.com --types 3 --personas 2 --questions 10
 
 # Run analysis (~660 credits)
 /botsee analyze
@@ -53,43 +61,77 @@ Shows current status, balance, and available commands.
 🔑 Key: bts_live_abc123...
 ```
 
-#### `/botsee setup <domain>`
-Setup BotSee for a domain. Handles account creation for new users.
+#### `/botsee signup`
+Signup for BotSee and get your API key.
 
 **New user (no API key):**
 ```bash
-/botsee setup https://example.com
+# Step 1: Get signup URL
+/botsee signup
+
+# Step 2: Visit the URL, complete signup, and paste your API key in the chat
+# Claude will automatically save it for you
+
+# Step 3: Create your site
+/botsee create-site https://example.com
 ```
 
-The setup command will:
-1. Create a signup token via the BotSee API
-2. Display a signup URL for you to complete registration
-3. Wait for signup completion
-4. Create site, generate customer types, personas, and questions
-5. Save credentials to `~/.botsee/config.json`
+The signup flow:
+1. Run `/botsee signup` to get your unique signup URL
+2. Visit the URL in your browser and complete signup
+3. Paste your API key in the chat (e.g., "My API key is bts_live_abc123")
+4. Claude automatically saves it - you can then run `/botsee create-site`
+
+**Optional contact info:**
+```bash
+/botsee signup --email you@example.com --name "Your Name" --company "Your Company"
+```
+
+Contact fields are optional - the API will use defaults if not provided.
 
 **Existing user (has API key):**
 ```bash
-/botsee setup https://example.com --api-key bts_live_YOUR_KEY
+/botsee signup --api-key bts_live_YOUR_KEY
 ```
 
-Skips signup, validates key, then creates site and generates types/personas/questions.
+Validates and saves your existing API key.
 
-**Cost:** ~75 credits with defaults (2/2/5)
+**Cost:** Free (signup doesn't consume credits)
+
+#### `/botsee create-site <domain>`
+Create site and generate content.
+
+**Requires:** API key from `/botsee signup`
+
+```bash
+/botsee create-site https://example.com
+```
+
+The create-site command will:
+1. Create a site for the domain
+2. Generate customer types, personas, and questions
+3. Save configuration to workspace and user config
+
+**Customize generation counts:**
+```bash
+/botsee create-site https://example.com --types 3 --personas 2 --questions 10
+```
+
+**Cost:** ~75 credits with defaults (2 types, 2 personas/type, 5 questions/persona)
 - Site creation: 5 credits
 - Customer types: 5 credits per type
 - Personas: 5 credits per persona
 - Questions: 10 credits flat per persona
 
-#### `/botsee configure <domain>`
+#### `/botsee create-site <domain>`
 Save custom configuration for later use with setup.
 
 ```bash
 # With defaults (2/2/5)
-/botsee configure https://example.com
+/botsee create-site https://example.com
 
 # With custom values
-/botsee configure https://example.com --types 3 --personas 3 --questions 10
+/botsee create-site https://example.com --types 3 --personas 3 --questions 10
 ```
 
 Saves to `.context/botsee-config.json`. Setup reads this config automatically.
@@ -376,7 +418,7 @@ You can:
 ## Configuration
 
 **Workspace Config** (`.context/botsee-config.json`):
-Saved by `/botsee configure`, used by `/botsee setup`:
+Saved by `/botsee create-site`, used by `/botsee setup`:
 ```json
 {
   "domain": "https://example.com",
@@ -443,7 +485,7 @@ Next: /botsee analyze
 
 ### Custom Setup
 ```bash
-/botsee configure https://www.example.com --types 3 --personas 3 --questions 10
+/botsee create-site https://www.example.com --types 3 --personas 3 --questions 10
 /botsee config-show
 /botsee setup https://www.example.com --api-key bts_live_abc123...
 ```
@@ -529,7 +571,7 @@ Version 2.0.0 introduces **breaking changes** to make the skill agent-friendly a
    - Content auto-saves (no save prompt)
 
 3. **New features:**
-   - `/botsee configure` - Pre-save custom generation counts
+   - `/botsee create-site` - Pre-save custom generation counts
    - `/botsee config-show` - View saved configuration
    - Results commands now require `<analysis_uuid>` parameter
 
@@ -558,7 +600,7 @@ Version 2.0.0 introduces **breaking changes** to make the skill agent-friendly a
 **Workspace Config** (`.context/botsee-config.json`)
 - **Purpose:** Stores generation defaults (types/personas/questions)
 - **Permissions:** Standard file permissions
-- **Created by:** `/botsee configure` command (optional)
+- **Created by:** `/botsee create-site` command (optional)
 - **Contents:**
   ```json
   {
@@ -580,7 +622,7 @@ Version 2.0.0 introduces **breaking changes** to make the skill agent-friendly a
 **Edit configuration:**
 ```bash
 # Workspace config (generation counts)
-/botsee configure <domain> --types 3 --personas 3 --questions 10
+/botsee create-site <domain> --types 3 --personas 3 --questions 10
 
 # User config (API key + site)
 /botsee setup <domain> --api-key <new_key>
