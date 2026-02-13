@@ -84,9 +84,13 @@ def load_user_config():
 def save_user_config(api_key, site_uuid):
     """Save user config to ~/.botsee/config.json with secure permissions."""
     USER_CONFIG.parent.mkdir(parents=True, exist_ok=True)
-    with open(USER_CONFIG, "w") as f:
-        json.dump({"api_key": api_key, "site_uuid": site_uuid}, f, indent=2)
-    os.chmod(USER_CONFIG, 0o600)
+    # Set umask to ensure file is created with secure permissions (no race window)
+    old_umask = os.umask(0o077)  # Only owner can read/write
+    try:
+        with open(USER_CONFIG, "w") as f:
+            json.dump({"api_key": api_key, "site_uuid": site_uuid}, f, indent=2)
+    finally:
+        os.umask(old_umask)  # Restore original umask
     os.chmod(USER_CONFIG.parent, 0o700)
 
 
@@ -126,63 +130,28 @@ def require_user_config():
     return config
 
 
-# --- Helper Functions ---
+# --- Generic CRUD helpers (reduces duplication) ---
 
 
-def is_success(status):
-    """Check if HTTP status code indicates success (2xx)."""
-    return 200 <= status < 300
-
-
-def check_response(resp, status, expected_statuses=None):
-    """Check API response and exit on error."""
-    if expected_statuses is None:
-        expected_statuses = [HTTP_OK, HTTP_CREATED, HTTP_ACCEPTED]
-
-    if status not in expected_statuses:
-        error_msg = resp.get("error", f"Request failed with HTTP {status}")
-        print(f"Error: {error_msg}", file=sys.stderr)
+def api_get(endpoint, expected_status=HTTP_OK):
+    """Fetch from API and return response, exit on error."""
+    config = require_user_config()
+    resp, status = api_call("GET", endpoint, api_key=config["api_key"])
+    if status != expected_status:
+        print(f"Failed (HTTP {status}): {resp}", file=sys.stderr)
         sys.exit(1)
     return resp
 
 
-def poll_until(endpoint, status_key, complete_value, fail_value=None, api_key=None, timeout=300, interval=3):
-    """
-    Poll an endpoint until a condition is met.
-
-    Args:
-        endpoint: API endpoint to poll
-        status_key: Key in response to check (e.g., "status")
-        complete_value: Value indicating completion (e.g., "completed")
-        fail_value: Value indicating failure (optional)
-        api_key: API key for authentication
-        timeout: Maximum time to poll in seconds
-        interval: Time between polls in seconds
-
-    Returns:
-        Response dict when complete
-
-    Raises:
-        SystemExit on timeout or failure
-    """
-    elapsed = 0
-    while elapsed < timeout:
-        time.sleep(interval)
-        elapsed += interval
-
-        resp, status = api_call("GET", endpoint, api_key=api_key)
-        if status != HTTP_OK:
-            continue
-
-        value = resp.get(status_key)
-        if value == complete_value:
-            return resp
-        if fail_value and value == fail_value:
-            print(f"Operation failed: {value}", file=sys.stderr)
-            sys.exit(1)
-
-    print(f"Operation timed out after {timeout} seconds", file=sys.stderr)
-    sys.exit(1)
+def api_delete(endpoint, resource_name, expected_status=HTTP_NO_CONTENT):
+    """Delete resource and print success message."""
+    config = require_user_config()
+    resp, status = api_call("DELETE", endpoint, api_key=config["api_key"])
+    if status == expected_status:
+        print(f"✅ {resource_name} archived")
+    else:
+        print(f"Failed (HTTP {status}): {resp}", file=sys.stderr)
+        sys.exit(1)
 
 
 # --- High-level workflow commands ---
@@ -230,71 +199,68 @@ def cmd_status(_args):
     print("  /botsee content               - Generate blog post")
 
 
-def cmd_signup(args):
-    """Signup for BotSee: create account (new users) or validate key (existing users)."""
-    if args.api_key:
-        # Existing user flow - validate and save API key
-        api_key = args.api_key
-        resp, status = api_call("POST", "/auth/validate", api_key=api_key)
-        if status != HTTP_OK:
-            print(f"Invalid API key (HTTP {status})", file=sys.stderr)
-            sys.exit(1)
-        balance = resp.get("balance", "?")
+def signup_validate(api_key):
+    """Validate and save an existing API key."""
+    resp, status = api_call("POST", "/auth/validate", api_key=api_key)
+    if status != HTTP_OK:
+        print(f"Invalid API key (HTTP {status})", file=sys.stderr)
+        sys.exit(1)
+    balance = resp.get("balance", "?")
 
-        # Save API key to config
-        save_user_config(api_key, None)
+    # Save API key to config
+    save_user_config(api_key, None)
 
-        print(f"✅ API key valid | Balance: {balance} credits")
-        print("")
-        print(f"Next: /botsee create-site <domain>")
-        return
+    print(f"✅ API key valid | Balance: {balance} credits")
+    print("")
+    print(f"Next: /botsee create-site <domain>")
 
-    # Check if there's a pending signup to complete
-    pending_signup_path = os.path.join(os.path.expanduser("~/.botsee"), "pending_signup.json")
-    if os.path.exists(pending_signup_path):
-        # Resume pending signup
-        print("🤖 BotSee Signup")
-        print("")
-        print("⏳ Checking signup status...")
 
-        with open(pending_signup_path, "r") as f:
-            pending = json.load(f)
+def signup_resume(pending_signup_path):
+    """Resume a pending signup by checking its status."""
+    print("🤖 BotSee Signup")
+    print("")
+    print("⏳ Checking signup status...")
 
-        status_url = pending.get("status_url")
-        setup_token = pending.get("setup_token")
+    with open(pending_signup_path, "r") as f:
+        pending = json.load(f)
 
-        # Check status once
-        poll_url = status_url if status_url else f"/signup/{setup_token}/status"
-        poll_resp, poll_status = api_call("GET", poll_url)
+    status_url = pending.get("status_url")
+    setup_token = pending.get("setup_token")
 
-        if poll_status == HTTP_OK:
-            signup_status = poll_resp.get("status")
-            if signup_status == "completed":
-                api_key = poll_resp.get("api_key")
-                if api_key:
-                    # Save API key and clean up pending signup
-                    save_user_config(api_key, None)
-                    os.remove(pending_signup_path)
+    # Check status once
+    poll_url = status_url if status_url else f"/signup/{setup_token}/status"
+    poll_resp, poll_status = api_call("GET", poll_url)
 
-                    print(f"✅ Signup complete!")
-                    print("")
-                    print(f"Next: /botsee create-site <domain>")
-                    return
-            elif signup_status == "expired":
+    if poll_status == HTTP_OK:
+        signup_status = poll_resp.get("status")
+        if signup_status == "completed":
+            api_key = poll_resp.get("api_key")
+            if api_key:
+                # Save API key and clean up pending signup
+                save_user_config(api_key, None)
                 os.remove(pending_signup_path)
-                print("Signup token expired. Run /botsee signup again.", file=sys.stderr)
-                sys.exit(1)
 
-        # Still pending
-        setup_url = pending.get("setup_url")
-        print(f"📋 Signup not yet complete. Please visit:")
-        print(f"")
-        print(f"   {setup_url}")
-        print(f"")
-        print("Once you've completed signup, run /botsee signup again to save your API key.")
-        sys.exit(0)
+                print(f"✅ Signup complete!")
+                print("")
+                print(f"Next: /botsee create-site <domain>")
+                return
+        elif signup_status == "expired":
+            os.remove(pending_signup_path)
+            print("Signup token expired. Run /botsee signup again.", file=sys.stderr)
+            sys.exit(1)
 
-    # New signup - create token
+    # Still pending
+    setup_url = pending.get("setup_url")
+    print(f"📋 Signup not yet complete. Please visit:")
+    print(f"")
+    print(f"   {setup_url}")
+    print(f"")
+    print("Once you've completed signup, run /botsee signup again to save your API key.")
+    sys.exit(1)  # Exit with error - signup incomplete
+
+
+def signup_new(args, pending_signup_path):
+    """Create a new signup token and save for later completion."""
     # Build signup data with optional contact fields
     signup_data = {}
     if args.email:
@@ -306,63 +272,25 @@ def cmd_signup(args):
 
     # Call signup API (contact fields are optional)
     resp, status = api_call("POST", "/signup", data=signup_data)
-    if not is_success(status):
+    if status not in (HTTP_OK, HTTP_CREATED):
         print(f"Signup failed (HTTP {status}): {resp}", file=sys.stderr)
         sys.exit(1)
 
     # Parse response - API returns setup_token, not token
     setup_token = resp.get("setup_token")
     setup_url = resp.get("setup_url")
-    status_url = resp.get("status_url")  # API provides this
+    status_url = resp.get("status_url")
 
     if not setup_token or not setup_url:
         print(f"Unexpected signup response: {resp}", file=sys.stderr)
         sys.exit(1)
 
-    # Show URL prominently
+    # Show URL prominently and save for later (non-interactive default)
     print(f"")
     print(f"Complete signup: {setup_url}")
     print(f"")
 
-    # Wait for user to complete signup
-    try:
-        input("Press Enter when done...")
-    except (EOFError, KeyboardInterrupt):
-        # Non-interactive mode or user cancelled - save pending signup and exit
-        os.makedirs(os.path.dirname(pending_signup_path), exist_ok=True)
-        with open(pending_signup_path, "w") as f:
-            json.dump({
-                "setup_token": setup_token,
-                "setup_url": setup_url,
-                "status_url": status_url
-            }, f, indent=2)
-        print("")
-        print("Run /botsee signup again after completing signup to save your API key.")
-        return
-
-    print("")
-    print("⏳ Checking signup status...")
-
-    # Check status
-    poll_url = status_url if status_url else f"/signup/{setup_token}/status"
-    poll_resp, poll_status = api_call("GET", poll_url)
-
-    if poll_status == HTTP_OK:
-        signup_status = poll_resp.get("status")
-        if signup_status == "completed":
-            api_key = poll_resp.get("api_key")
-            if api_key:
-                # Save API key
-                save_user_config(api_key, None)
-                print(f"✅ Signup complete!")
-                print("")
-                print(f"Next: /botsee create-site <domain>")
-                return
-        elif signup_status == "expired":
-            print("Signup token expired. Run /botsee signup again.", file=sys.stderr)
-            sys.exit(1)
-
-    # Still pending - save for later
+    # Save pending signup (non-interactive mode - agent-friendly)
     os.makedirs(os.path.dirname(pending_signup_path), exist_ok=True)
     with open(pending_signup_path, "w") as f:
         json.dump({
@@ -370,10 +298,21 @@ def cmd_signup(args):
             "setup_url": setup_url,
             "status_url": status_url
         }, f, indent=2)
-    print(f"Signup not yet complete. Please complete it at:")
-    print(f"   {setup_url}")
-    print("")
-    print("Then run /botsee signup again to save your API key.")
+    os.chmod(pending_signup_path, 0o600)  # Secure permissions
+    print("Run /botsee signup again after completing signup to save your API key.")
+
+
+def cmd_signup(args):
+    """Signup for BotSee: create account (new users) or validate key (existing users)."""
+    # Route to appropriate signup flow
+    if args.api_key:
+        return signup_validate(args.api_key)
+
+    pending_signup_path = os.path.join(os.path.expanduser("~/.botsee"), "pending_signup.json")
+    if os.path.exists(pending_signup_path):
+        return signup_resume(pending_signup_path)
+
+    return signup_new(args, pending_signup_path)
 
 
 def cmd_create_site(args):
@@ -406,7 +345,7 @@ def cmd_create_site(args):
     # Create site
     print(f"⏳ Creating site: {domain}")
     resp, status = api_call("POST", "/sites", data={"url": domain}, api_key=api_key)
-    if status not in (200, 201):
+    if status not in (HTTP_OK, HTTP_CREATED):
         print(f"Site creation failed (HTTP {status}): {resp}", file=sys.stderr)
         sys.exit(1)
     site_uuid = resp.get("site", {}).get("uuid")
@@ -534,14 +473,21 @@ def cmd_analyze(args):
     print(f"📊 Analysis started: {analysis_uuid}")
     print("⏳ Processing (this may take a few minutes)...")
 
-    # Poll for completion
+    # Poll for completion with exponential backoff
     elapsed = 0
-    while elapsed < 600:  # 10 minute timeout for analysis
-        time.sleep(5)
-        elapsed += 5
+    wait_time = 1  # Start with 1 second
+    max_wait = 30  # Cap at 30 seconds
+
+    while elapsed < ANALYSIS_POLL_TIMEOUT:
+        # Check immediately on first iteration, then wait
+        if elapsed > 0:
+            time.sleep(wait_time)
+            elapsed += wait_time
+            # Exponential backoff: 1s → 2s → 4s → 8s → ... → max 30s
+            wait_time = min(wait_time * 2, max_wait)
 
         resp, status = api_call("GET", f"/analysis/{analysis_uuid}", api_key=api_key)
-        if status != 200:
+        if status != HTTP_OK:
             continue
 
         analysis_status = resp.get("analysis", {}).get("status")
@@ -741,11 +687,7 @@ def cmd_list_types(args):
     """List customer types for a site."""
     config = require_user_config()
     site_uuid = args.site_uuid or config["site_uuid"]
-    resp, status = api_call("GET", f"/sites/{site_uuid}/customer-types", api_key=config["api_key"])
-    if status != 200:
-        print(f"Failed (HTTP {status}): {resp}", file=sys.stderr)
-        sys.exit(1)
-
+    resp = api_get(f"/sites/{site_uuid}/customer-types")
     types = resp.get("customer_types", [])
     if not types:
         print("No customer types found.")
@@ -763,12 +705,7 @@ def cmd_list_types(args):
 
 def cmd_get_type(args):
     """Get a customer type by UUID."""
-    config = require_user_config()
-    resp, status = api_call("GET", f"/customer-types/{args.uuid}", api_key=config["api_key"])
-    if status != 200:
-        print(f"Failed (HTTP {status}): {resp}", file=sys.stderr)
-        sys.exit(1)
-
+    resp = api_get(f"/customer-types/{args.uuid}")
     ct = resp.get("customer_type", {})
     print(json.dumps(ct, indent=2))
 
@@ -834,13 +771,7 @@ def cmd_update_type(args):
 
 def cmd_archive_type(args):
     """Archive a customer type."""
-    config = require_user_config()
-    resp, status = api_call("DELETE", f"/customer-types/{args.uuid}", api_key=config["api_key"])
-    if status == 204:
-        print(f"✅ Customer type {args.uuid} archived")
-    else:
-        print(f"Failed (HTTP {status}): {resp}", file=sys.stderr)
-        sys.exit(1)
+    api_delete(f"/customer-types/{args.uuid}", f"Customer type {args.uuid}")
 
 
 # --- Personas CRUD ---
@@ -848,15 +779,7 @@ def cmd_archive_type(args):
 
 def cmd_list_personas(args):
     """List personas for a customer type."""
-    config = require_user_config()
-    resp, status = api_call(
-        "GET", f"/customer-types/{args.type_uuid}/personas",
-        api_key=config["api_key"]
-    )
-    if status != 200:
-        print(f"Failed (HTTP {status}): {resp}", file=sys.stderr)
-        sys.exit(1)
-
+    resp = api_get(f"/customer-types/{args.type_uuid}/personas")
     personas = resp.get("personas", [])
     if not personas:
         print("No personas found.")
@@ -874,12 +797,7 @@ def cmd_list_personas(args):
 
 def cmd_get_persona(args):
     """Get a persona by UUID."""
-    config = require_user_config()
-    resp, status = api_call("GET", f"/personas/{args.uuid}", api_key=config["api_key"])
-    if status != 200:
-        print(f"Failed (HTTP {status}): {resp}", file=sys.stderr)
-        sys.exit(1)
-
+    resp = api_get(f"/personas/{args.uuid}")
     persona = resp.get("persona", {})
     print(json.dumps(persona, indent=2))
 
@@ -944,13 +862,7 @@ def cmd_update_persona(args):
 
 def cmd_archive_persona(args):
     """Archive a persona."""
-    config = require_user_config()
-    resp, status = api_call("DELETE", f"/personas/{args.uuid}", api_key=config["api_key"])
-    if status == 204:
-        print(f"✅ Persona {args.uuid} archived")
-    else:
-        print(f"Failed (HTTP {status}): {resp}", file=sys.stderr)
-        sys.exit(1)
+    api_delete(f"/personas/{args.uuid}", f"Persona {args.uuid}")
 
 
 # --- Questions CRUD ---
@@ -958,15 +870,7 @@ def cmd_archive_persona(args):
 
 def cmd_list_questions(args):
     """List questions for a persona."""
-    config = require_user_config()
-    resp, status = api_call(
-        "GET", f"/personas/{args.persona_uuid}/questions",
-        api_key=config["api_key"]
-    )
-    if status != 200:
-        print(f"Failed (HTTP {status}): {resp}", file=sys.stderr)
-        sys.exit(1)
-
+    resp = api_get(f"/personas/{args.persona_uuid}/questions")
     questions = resp.get("questions", [])
     if not questions:
         print("No questions found.")
@@ -981,12 +885,7 @@ def cmd_list_questions(args):
 
 def cmd_get_question(args):
     """Get a question by UUID."""
-    config = require_user_config()
-    resp, status = api_call("GET", f"/questions/{args.uuid}/results", api_key=config["api_key"])
-    if status != 200:
-        print(f"Failed (HTTP {status}): {resp}", file=sys.stderr)
-        sys.exit(1)
-
+    resp = api_get(f"/questions/{args.uuid}/results")
     question = resp.get("question", {})
     print(json.dumps(question, indent=2))
 
@@ -1046,13 +945,7 @@ def cmd_update_question(args):
 
 def cmd_delete_question(args):
     """Delete a question (permanent)."""
-    config = require_user_config()
-    resp, status = api_call("DELETE", f"/questions/{args.uuid}", api_key=config["api_key"])
-    if status == 204:
-        print(f"✅ Question {args.uuid} deleted")
-    else:
-        print(f"Failed (HTTP {status}): {resp}", file=sys.stderr)
-        sys.exit(1)
+    api_delete(f"/questions/{args.uuid}", f"Question {args.uuid}", expected_status=HTTP_NO_CONTENT)
 
 
 # --- Results commands ---
@@ -1060,60 +953,28 @@ def cmd_delete_question(args):
 
 def cmd_results_competitors(args):
     """Get competitors from analysis."""
-    config = require_user_config()
-    resp, status = api_call(
-        "GET", f"/analysis/{args.analysis_uuid}/competitors",
-        api_key=config["api_key"]
-    )
-    if status != 200:
-        print(f"Failed (HTTP {status}): {resp}", file=sys.stderr)
-        sys.exit(1)
-
+    resp = api_get(f"/analysis/{args.analysis_uuid}/competitors")
     # Return full response with by_customer_type and overall_summary
     print(json.dumps(resp, indent=2))
 
 
 def cmd_results_keywords(args):
     """Get keywords from analysis."""
-    config = require_user_config()
-    resp, status = api_call(
-        "GET", f"/analysis/{args.analysis_uuid}/keywords",
-        api_key=config["api_key"]
-    )
-    if status != 200:
-        print(f"Failed (HTTP {status}): {resp}", file=sys.stderr)
-        sys.exit(1)
-
+    resp = api_get(f"/analysis/{args.analysis_uuid}/keywords")
     keywords = resp.get("keywords", [])
     print(json.dumps(keywords, indent=2))
 
 
 def cmd_results_sources(args):
     """Get sources from analysis."""
-    config = require_user_config()
-    resp, status = api_call(
-        "GET", f"/analysis/{args.analysis_uuid}/sources",
-        api_key=config["api_key"]
-    )
-    if status != 200:
-        print(f"Failed (HTTP {status}): {resp}", file=sys.stderr)
-        sys.exit(1)
-
+    resp = api_get(f"/analysis/{args.analysis_uuid}/sources")
     sources = resp.get("sources", [])
     print(json.dumps(sources, indent=2))
 
 
 def cmd_results_responses(args):
     """Get raw LLM responses from analysis."""
-    config = require_user_config()
-    resp, status = api_call(
-        "GET", f"/analysis/{args.analysis_uuid}/responses",
-        api_key=config["api_key"]
-    )
-    if status != 200:
-        print(f"Failed (HTTP {status}): {resp}", file=sys.stderr)
-        sys.exit(1)
-
+    resp = api_get(f"/analysis/{args.analysis_uuid}/responses")
     responses = resp.get("responses", [])
     print(json.dumps(responses, indent=2))
 

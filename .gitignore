@@ -2,6 +2,11 @@
 test_config.json
 .botsee/
 
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
 # macOS
 .DS_Store
 
