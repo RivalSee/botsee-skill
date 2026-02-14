@@ -456,7 +456,7 @@ def signup_resume(pending_signup_path):
     print(f"")
     print(f"   {setup_url}")
     print(f"")
-    print("After completing signup, run /botsee signup again to check status")
+    print("After completing signup, paste the text provided on the website here.")
     sys.exit(1)  # Exit with error - signup incomplete
 
 
@@ -504,7 +504,7 @@ def signup_new(args, pending_signup_path):
             "status_url": status_url
         }, f, indent=2)
     os.chmod(pending_signup_path, 0o600)  # Secure permissions
-    print("After completing signup, run /botsee signup again to check status")
+    print("After completing signup, paste the text provided on the website here.")
 
 
 def cmd_signup(args):
