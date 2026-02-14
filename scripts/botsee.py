@@ -201,18 +201,9 @@ def cmd_status(_args):
     # Show only last 4 characters of API key for security
     key_suffix = config["api_key"][-4:] if len(config["api_key"]) >= 4 else "****"
 
-    # Get email from config or API response
-    email = config.get("contact_email") or resp.get('email', resp.get('user_email', resp.get('account_email')))
-    company = config.get("company_name")
-
     print("🤖 BotSee")
     print("━━━━━━━━━━━━━━━")
-    if email:
-        print(f"📧 Email: {email}")
-    if company:
-        print(f"🏢 Company: {company}")
     print(f"💰 Credits: {resp.get('balance', '?')}")
-    print(f"🌐 Sites: {resp.get('sites_count', 0)}")
     if active_site:
         site_url = active_site.get("url", "?")
         site_name = active_site.get("product_name", "?")
@@ -220,26 +211,41 @@ def cmd_status(_args):
     print(f"🔑 Key: ...{key_suffix}")
     print("")
     print("Commands:")
+    print("  /botsee account               - View account details")
     print("  /botsee signup                - Get API key")
     print("  /botsee create-site <domain>  - Create site")
     print("  /botsee analyze               - Analyze website")
     print("  /botsee content               - Generate blog post")
 
 
-def signup_validate(api_key):
-    """Validate and save an existing API key."""
-    resp, status = api_call("POST", "/auth/validate", api_key=api_key)
+def cmd_account(_args):
+    """Show account details including email and company."""
+    config = require_user_config()
+
+    resp, status = api_call("GET", "/account", api_key=config["api_key"])
     if status != HTTP_OK:
-        print(f"Invalid API key (HTTP {status})", file=sys.stderr)
+        print(f"Failed to fetch account (HTTP {status}): {resp}", file=sys.stderr)
         sys.exit(1)
-    balance = resp.get("balance", "?")
 
-    # Save API key to config
-    save_user_config(api_key, None)
+    email = resp.get("owner_email")
+    company = resp.get("company_name")
+    owner_name = resp.get("owner_name")
+    site_count = resp.get("site_count", 0)
 
-    print(f"✅ API key valid | Balance: {balance} credits")
-    print("")
-    print(f"Next: /botsee create-site <domain>")
+    # Update config if email/company were missing
+    if email or company:
+        site_uuid = config.get("site_uuid")
+        save_user_config(config["api_key"], site_uuid, email, company)
+
+    print("🤖 BotSee Account")
+    print("━━━━━━━━━━━━━━━━━")
+    if owner_name:
+        print(f"👤 Name: {owner_name}")
+    if email:
+        print(f"📧 Email: {email}")
+    if company:
+        print(f"🏢 Company: {company}")
+    print(f"🌐 Sites: {site_count}")
 
 
 def signup_resume(pending_signup_path):
@@ -284,7 +290,7 @@ def signup_resume(pending_signup_path):
     print(f"")
     print(f"   {setup_url}")
     print(f"")
-    print("Once you've completed signup, run /botsee signup again to save your API key.")
+    print("After completing signup, run /botsee signup again to check status")
     sys.exit(1)  # Exit with error - signup incomplete
 
 
@@ -328,15 +334,11 @@ def signup_new(args, pending_signup_path):
             "status_url": status_url
         }, f, indent=2)
     os.chmod(pending_signup_path, 0o600)  # Secure permissions
-    print("Run /botsee signup again after completing signup to save your API key.")
+    print("After completing signup, run /botsee signup again to check status")
 
 
 def cmd_signup(args):
-    """Signup for BotSee: create account (new users) or validate key (existing users)."""
-    # Route to appropriate signup flow
-    if args.api_key:
-        return signup_validate(args.api_key)
-
+    """Signup for BotSee: create account and get API key."""
     pending_signup_path = os.path.join(os.path.expanduser("~/.botsee"), "pending_signup.json")
     if os.path.exists(pending_signup_path):
         return signup_resume(pending_signup_path)
@@ -1020,9 +1022,9 @@ def main():
 
     # High-level workflow commands
     subparsers.add_parser("status", help="Show account status and balance")
+    subparsers.add_parser("account", help="Show account details (email, company)")
 
     signup_parser = subparsers.add_parser("signup", help="Signup for BotSee and get API key")
-    signup_parser.add_argument("--api-key", help="Existing API key (skip signup)")
     signup_parser.add_argument("--email", help="Contact email (optional)")
     signup_parser.add_argument("--name", help="Contact name (optional)")
     signup_parser.add_argument("--company", help="Company name (optional)")
@@ -1138,6 +1140,7 @@ def main():
 
     commands = {
         "status": cmd_status,
+        "account": cmd_account,
         "signup": cmd_signup,
         "create-site": cmd_create_site,
         "config-show": cmd_config_show,
