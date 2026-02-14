@@ -4,12 +4,19 @@
 import argparse
 import json
 import os
+import re
+import shutil
 import ssl
 import sys
+import tarfile
+import tempfile
 import time
 import urllib.request
 import urllib.error
 from pathlib import Path
+
+# Version
+__version__ = "2.0.0"
 
 # API Configuration
 BASE_URL = "https://botsee.io"
@@ -40,11 +47,15 @@ TEXT_TRUNCATE_LEN = 80
 
 
 def api_call(method, endpoint, data=None, api_key=None, timeout=30):
-    """Make an API call to BotSee. Returns (response_dict, http_status)."""
+    """Make an API call to BotSee. Returns (response_dict, http_status, update_available)."""
     url = f"{BASE_URL}/v1{endpoint}"
     headers = {"Content-Type": "application/json"}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
+
+    # Add SKILL_VER to data payload
+    if data is not None:
+        data["SKILL_VER"] = __version__
 
     body = json.dumps(data).encode() if data else None
     req = urllib.request.Request(url, data=body, headers=headers, method=method)
@@ -57,7 +68,9 @@ def api_call(method, endpoint, data=None, api_key=None, timeout=30):
     try:
         with urllib.request.urlopen(req, timeout=timeout, context=ssl_context) as resp:
             raw = resp.read()
-            return json.loads(raw) if raw else {}, resp.status
+            response_data = json.loads(raw) if raw else {}
+            update_available = response_data.get("skill_update_available")
+            return response_data, resp.status, update_available
     except urllib.error.HTTPError as e:
         raw = e.read()
         try:
@@ -65,12 +78,103 @@ def api_call(method, endpoint, data=None, api_key=None, timeout=30):
             # Sanitize error messages - don't leak API keys
             if "api_key" in str(error_data).lower():
                 error_data = {"error": "Authentication failed"}
-            return error_data, e.code
+            return error_data, e.code, None
         except (json.JSONDecodeError, ValueError):
-            return {"error": "Request failed"}, e.code
+            return {"error": "Request failed"}, e.code, None
     except urllib.error.URLError as e:
         print(f"Connection error: {e.reason}", file=sys.stderr)
         sys.exit(1)
+
+
+def show_update_notification(new_version):
+    """Display update notification in command output."""
+    print(f"✨ Update available: BotSee {new_version}")
+    print(f"   Run: /botsee update")
+
+
+def download_github_release(version):
+    """Download and extract GitHub release archive.
+
+    Args:
+        version: Version string (e.g., "2.0.2")
+
+    Returns:
+        Path to extracted directory
+
+    Raises:
+        ValueError: Invalid version format
+        urllib.error.URLError: Download failed
+    """
+    # Validate version format (semver)
+    if not re.match(r'^\d+\.\d+\.\d+$', version):
+        raise ValueError(f"Invalid version format: {version}")
+
+    # Construct GitHub release URL
+    url = f"https://github.com/RivalSee/botsee-skill/archive/refs/tags/v{version}.tar.gz"
+
+    # Create temp directory
+    temp_dir = tempfile.mkdtemp(prefix="botsee-update-")
+
+    try:
+        # Download archive with SSL verification
+        ssl_context = ssl.create_default_context()
+        ssl_context.check_hostname = True
+        ssl_context.verify_mode = ssl.CERT_REQUIRED
+
+        print(f"Downloading BotSee v{version}...", file=sys.stderr)
+        req = urllib.request.Request(url)
+
+        with urllib.request.urlopen(req, timeout=60, context=ssl_context) as response:
+            archive_path = Path(temp_dir) / f"botsee-{version}.tar.gz"
+            with open(archive_path, 'wb') as f:
+                f.write(response.read())
+
+        # Extract archive
+        print(f"Extracting archive...", file=sys.stderr)
+        with tarfile.open(archive_path, 'r:gz') as tar:
+            tar.extractall(path=temp_dir)
+
+        # Find extracted directory (format: botsee-skill-{version})
+        extracted_dirs = [d for d in Path(temp_dir).iterdir() if d.is_dir()]
+        if not extracted_dirs:
+            raise RuntimeError("Archive extraction failed: no directories found")
+
+        return extracted_dirs[0]
+
+    except Exception as e:
+        # Clean up temp directory on failure
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        raise
+
+
+def install_update(source_dir):
+    """Install update from extracted directory.
+
+    Args:
+        source_dir: Path to extracted release directory
+    """
+    install_dir = Path.home() / ".claude" / "skills" / "botsee"
+
+    # Ensure install directory exists
+    install_dir.mkdir(parents=True, exist_ok=True)
+
+    # Copy files (overwrite existing)
+    print(f"Installing to {install_dir}...", file=sys.stderr)
+
+    # Copy SKILL.md
+    shutil.copy2(source_dir / "SKILL.md", install_dir / "SKILL.md")
+
+    # Copy scripts directory
+    scripts_src = source_dir / "scripts"
+    scripts_dst = install_dir / "scripts"
+
+    if scripts_dst.exists():
+        shutil.rmtree(scripts_dst)
+
+    shutil.copytree(scripts_src, scripts_dst)
+
+    print(f"✅ BotSee updated successfully!", file=sys.stderr)
+    print(f"   Restart Claude Code to load the new version", file=sys.stderr)
 
 
 def load_user_config():
@@ -154,7 +258,7 @@ def require_user_config():
 def api_get(endpoint, expected_status=HTTP_OK):
     """Fetch from API and return response, exit on error."""
     config = require_user_config()
-    resp, status = api_call("GET", endpoint, api_key=config["api_key"])
+    resp, status, _ = api_call("GET", endpoint, api_key=config["api_key"])
     if status != expected_status:
         print(f"Failed (HTTP {status}): {resp}", file=sys.stderr)
         sys.exit(1)
@@ -164,7 +268,7 @@ def api_get(endpoint, expected_status=HTTP_OK):
 def api_delete(endpoint, resource_name, expected_status=HTTP_NO_CONTENT):
     """Delete resource and print success message."""
     config = require_user_config()
-    resp, status = api_call("DELETE", endpoint, api_key=config["api_key"])
+    resp, status, _ = api_call("DELETE", endpoint, api_key=config["api_key"])
     if status == expected_status:
         print(f"✅ {resource_name} archived")
     else:
@@ -185,7 +289,7 @@ def cmd_status(_args):
         print("Learn more: https://botsee.io/docs")
         return
 
-    resp, status = api_call("GET", "/usage", api_key=config["api_key"])
+    resp, status, update_available = api_call("GET", "/usage", api_key=config["api_key"])
     if status != HTTP_OK:
         print(f"API error ({status}). Run: /botsee signup", file=sys.stderr)
         sys.exit(1)
@@ -194,9 +298,13 @@ def cmd_status(_args):
     active_site = None
     site_uuid = config.get("site_uuid")
     if site_uuid:
-        site_resp, site_status = api_call("GET", f"/sites/{site_uuid}", api_key=config["api_key"])
+        site_resp, site_status, _ = api_call("GET", f"/sites/{site_uuid}", api_key=config["api_key"])
         if site_status == HTTP_OK:
             active_site = site_resp.get("site", {})
+
+    # Show update notification if available
+    if update_available:
+        show_update_notification(update_available)
 
     # Show only last 4 characters of API key for security
     key_suffix = config["api_key"][-4:] if len(config["api_key"]) >= 4 else "****"
@@ -222,7 +330,7 @@ def cmd_account(_args):
     """Show account details including email and company."""
     config = require_user_config()
 
-    resp, status = api_call("GET", "/account", api_key=config["api_key"])
+    resp, status, update_available = api_call("GET", "/account", api_key=config["api_key"])
     if status != HTTP_OK:
         print(f"Failed to fetch account (HTTP {status}): {resp}", file=sys.stderr)
         sys.exit(1)
@@ -237,6 +345,10 @@ def cmd_account(_args):
         site_uuid = config.get("site_uuid")
         save_user_config(config["api_key"], site_uuid, email, company)
 
+    # Show update notification if available
+    if update_available:
+        show_update_notification(update_available)
+
     print("🤖 BotSee Account")
     print("━━━━━━━━━━━━━━━━━")
     if owner_name:
@@ -246,6 +358,60 @@ def cmd_account(_args):
     if company:
         print(f"🏢 Company: {company}")
     print(f"🌐 Sites: {site_count}")
+
+
+def cmd_update(_args):
+    """Update BotSee skill to latest version."""
+    try:
+        # Make API call to get latest version
+        # Use a lightweight endpoint (e.g., GET /sites)
+        config = load_user_config()
+        if not config:
+            print("No BotSee config found. Run: /botsee setup <domain>", file=sys.stderr)
+            sys.exit(1)
+
+        resp, status, update_available = api_call(
+            "GET",
+            "/sites",
+            api_key=config.get("api_key")
+        )
+
+        if status != 200:
+            print(f"Failed to check for updates (HTTP {status})", file=sys.stderr)
+            sys.exit(1)
+
+        if not update_available:
+            print("✅ BotSee is up to date!")
+            return
+
+        new_version = update_available
+        print(f"Updating BotSee from {__version__} to {new_version}...")
+
+        # Download and extract
+        source_dir = download_github_release(new_version)
+
+        # Install
+        install_update(source_dir)
+
+        # Clean up
+        shutil.rmtree(source_dir.parent, ignore_errors=True)
+
+    except ValueError as e:
+        print(f"Update failed: {e}", file=sys.stderr)
+        print(f"Download manually: https://github.com/RivalSee/botsee-skill", file=sys.stderr)
+        sys.exit(1)
+    except urllib.error.HTTPError as e:
+        print(f"Download failed (HTTP {e.code})", file=sys.stderr)
+        print(f"Download manually: https://github.com/RivalSee/botsee-skill", file=sys.stderr)
+        sys.exit(1)
+    except urllib.error.URLError as e:
+        print(f"Connection error: {e.reason}", file=sys.stderr)
+        print(f"Download manually: https://github.com/RivalSee/botsee-skill", file=sys.stderr)
+        sys.exit(1)
+    except Exception as e:
+        print(f"Update failed: {e}", file=sys.stderr)
+        print(f"Download manually: https://github.com/RivalSee/botsee-skill", file=sys.stderr)
+        sys.exit(1)
 
 
 def signup_resume(pending_signup_path):
@@ -262,7 +428,7 @@ def signup_resume(pending_signup_path):
 
     # Check status once
     poll_url = status_url if status_url else f"/signup/{setup_token}/status"
-    poll_resp, poll_status = api_call("GET", poll_url)
+    poll_resp, poll_status, _ = api_call("GET", poll_url)
 
     if poll_status == HTTP_OK:
         signup_status = poll_resp.get("status")
@@ -306,10 +472,14 @@ def signup_new(args, pending_signup_path):
         signup_data["company_name"] = args.company
 
     # Call signup API (contact fields are optional)
-    resp, status = api_call("POST", "/signup", data=signup_data)
+    resp, status, update_available = api_call("POST", "/signup", data=signup_data)
     if status not in (HTTP_OK, HTTP_CREATED):
         print(f"Signup failed (HTTP {status}): {resp}", file=sys.stderr)
         sys.exit(1)
+
+    # Show update notification if available
+    if update_available:
+        show_update_notification(update_available)
 
     # Parse response - API returns setup_token, not token
     setup_token = resp.get("setup_token")
@@ -375,7 +545,7 @@ def cmd_create_site(args):
 
     # Create site
     print(f"⏳ Creating site: {domain}")
-    resp, status = api_call("POST", "/sites", data={"url": domain}, api_key=api_key)
+    resp, status, _ = api_call("POST", "/sites", data={"url": domain}, api_key=api_key)
     if status not in (HTTP_OK, HTTP_CREATED):
         print(f"Site creation failed (HTTP {status}): {resp}", file=sys.stderr)
         sys.exit(1)
@@ -385,7 +555,7 @@ def cmd_create_site(args):
 
     # Generate customer types
     print(f"⏳ Generating {types} customer type(s)...")
-    resp, status = api_call(
+    resp, status, _ = api_call(
         "POST", f"/sites/{site_uuid}/customer-types/generate",
         data={"count": types}, api_key=api_key
     )
@@ -405,7 +575,7 @@ def cmd_create_site(args):
     for ct in ct_list:
         ct_uuid = ct.get("uuid")
         ct_name = ct.get("name", "?")
-        resp, status = api_call(
+        resp, status, _ = api_call(
             "POST", f"/customer-types/{ct_uuid}/personas/generate",
             data={"count": personas}, api_key=api_key
         )
@@ -424,7 +594,7 @@ def cmd_create_site(args):
     total_questions = 0
     print(f"⏳ Generating questions ({questions} per persona)...")
     for p_uuid in all_persona_uuids:
-        resp, status = api_call(
+        resp, status, _ = api_call(
             "POST", f"/personas/{p_uuid}/questions/generate",
             data={"count": questions}, api_key=api_key
         )
@@ -439,7 +609,7 @@ def cmd_create_site(args):
     save_workspace_config(domain, types, personas, questions)
 
     # Re-fetch balance
-    usage_resp, _ = api_call("GET", "/usage", api_key=api_key)
+    usage_resp, _, _ = api_call("GET", "/usage", api_key=api_key)
     balance = usage_resp.get("balance", "?")
 
     print("✅ Configuration complete!")
@@ -491,10 +661,14 @@ def cmd_analyze(args):
 
     # Start analysis
     print("⏳ Starting analysis...")
-    resp, status = api_call("POST", "/analysis", data={"site_uuid": site_uuid}, api_key=api_key)
+    resp, status, update_available = api_call("POST", "/analysis", data={"site_uuid": site_uuid}, api_key=api_key)
     if status not in (200, 201, 202):
         print(f"Analysis failed (HTTP {status}): {resp}", file=sys.stderr)
         sys.exit(1)
+
+    # Show update notification if available
+    if update_available:
+        show_update_notification(update_available)
 
     analysis_uuid = resp.get("analysis", {}).get("uuid")
     if not analysis_uuid:
@@ -521,7 +695,7 @@ def cmd_analyze(args):
             # Exponential backoff: 1s → 2s → 4s → 8s → ... → max 30s
             wait_time = min(wait_time * 2, max_wait)
 
-        resp, status = api_call("GET", f"/analysis/{analysis_uuid}", api_key=api_key)
+        resp, status, _ = api_call("GET", f"/analysis/{analysis_uuid}", api_key=api_key)
         if status != HTTP_OK:
             continue
 
@@ -535,9 +709,9 @@ def cmd_analyze(args):
             sys.exit(1)
 
     # Fetch results
-    comp_resp, _ = api_call("GET", f"/analysis/{analysis_uuid}/competitors", api_key=api_key)
-    kw_resp, _ = api_call("GET", f"/analysis/{analysis_uuid}/keywords", api_key=api_key)
-    src_resp, _ = api_call("GET", f"/analysis/{analysis_uuid}/sources", api_key=api_key)
+    comp_resp, _, _ = api_call("GET", f"/analysis/{analysis_uuid}/competitors", api_key=api_key)
+    kw_resp, _, _ = api_call("GET", f"/analysis/{analysis_uuid}/keywords", api_key=api_key)
+    src_resp, _, _ = api_call("GET", f"/analysis/{analysis_uuid}/sources", api_key=api_key)
 
     # Display competitors by customer type
     by_customer_type = comp_resp.get("by_customer_type", [])
@@ -588,7 +762,7 @@ def cmd_analyze(args):
         print("")
 
     # Show balance
-    usage_resp, _ = api_call("GET", "/usage", api_key=api_key)
+    usage_resp, _, _ = api_call("GET", "/usage", api_key=api_key)
     balance = usage_resp.get("balance", "?")
     print(f"💰 Remaining: {balance} credits")
 
@@ -600,7 +774,7 @@ def cmd_content(_args):
     site_uuid = config["site_uuid"]
 
     # Get latest analysis
-    resp, status = api_call("GET", f"/sites/{site_uuid}/analysis?limit=1", api_key=api_key)
+    resp, status, _ = api_call("GET", f"/sites/{site_uuid}/analysis?limit=1", api_key=api_key)
     if status != 200:
         print(f"Failed to fetch analyses (HTTP {status})", file=sys.stderr)
         sys.exit(1)
@@ -613,7 +787,7 @@ def cmd_content(_args):
     analysis_uuid = analyses[0].get("uuid")
 
     print("⏳ Generating blog post...")
-    resp, status = api_call(
+    resp, status, _ = api_call(
         "POST", f"/analysis/{analysis_uuid}/content",
         data={}, api_key=api_key
     )
@@ -644,10 +818,14 @@ def cmd_content(_args):
 def cmd_list_sites(_args):
     """List all sites."""
     config = require_user_config()
-    resp, status = api_call("GET", "/sites", api_key=config["api_key"])
+    resp, status, update_available = api_call("GET", "/sites", api_key=config["api_key"])
     if status != 200:
         print(f"Failed (HTTP {status}): {resp}", file=sys.stderr)
         sys.exit(1)
+
+    # Show update notification if available
+    if update_available:
+        show_update_notification(update_available)
 
     sites = resp.get("sites", [])
     if not sites:
@@ -668,7 +846,7 @@ def cmd_list_sites(_args):
 def cmd_get_site(args):
     """Get a site by UUID."""
     config = require_user_config()
-    resp, status = api_call("GET", f"/sites/{args.uuid}", api_key=config["api_key"])
+    resp, status, _ = api_call("GET", f"/sites/{args.uuid}", api_key=config["api_key"])
     if status != 200:
         print(f"Failed (HTTP {status}): {resp}", file=sys.stderr)
         sys.exit(1)
@@ -680,7 +858,7 @@ def cmd_get_site(args):
 def cmd_archive_site(args):
     """Archive (soft-delete) a site."""
     config = require_user_config()
-    resp, status = api_call("DELETE", f"/sites/{args.uuid}", api_key=config["api_key"])
+    resp, status, _ = api_call("DELETE", f"/sites/{args.uuid}", api_key=config["api_key"])
     if status == 204:
         print(f"✅ Site {args.uuid} archived")
     else:
@@ -695,7 +873,7 @@ def cmd_use_site(args):
     site_uuid = args.uuid
 
     # Verify site exists
-    resp, status = api_call("GET", f"/sites/{site_uuid}", api_key=api_key)
+    resp, status, _ = api_call("GET", f"/sites/{site_uuid}", api_key=api_key)
     if status != 200:
         print(f"Failed to fetch site (HTTP {status}): {resp}", file=sys.stderr)
         sys.exit(1)
@@ -749,7 +927,7 @@ def cmd_create_type(args):
     if args.description:
         data["description"] = args.description
 
-    resp, status = api_call(
+    resp, status, _ = api_call(
         "POST", f"/sites/{args.site_uuid}/customer-types",
         data=data, api_key=config["api_key"]
     )
@@ -767,7 +945,7 @@ def cmd_generate_types(args):
     """AI-generate customer types (5 credits each)."""
     config = require_user_config()
     site_uuid = args.site_uuid or config["site_uuid"]
-    resp, status = api_call(
+    resp, status, _ = api_call(
         "POST", f"/sites/{site_uuid}/customer-types/generate",
         data={"count": args.count}, api_key=config["api_key"]
     )
@@ -790,7 +968,7 @@ def cmd_update_type(args):
     if args.description:
         data["description"] = args.description
 
-    resp, status = api_call(
+    resp, status, _ = api_call(
         "PUT", f"/customer-types/{args.uuid}",
         data=data, api_key=config["api_key"]
     )
@@ -841,7 +1019,7 @@ def cmd_create_persona(args):
     if args.description:
         data["description"] = args.description
 
-    resp, status = api_call(
+    resp, status, _ = api_call(
         "POST", f"/customer-types/{args.type_uuid}/personas",
         data=data, api_key=config["api_key"]
     )
@@ -858,7 +1036,7 @@ def cmd_create_persona(args):
 def cmd_generate_personas(args):
     """AI-generate personas (5 credits each)."""
     config = require_user_config()
-    resp, status = api_call(
+    resp, status, _ = api_call(
         "POST", f"/customer-types/{args.type_uuid}/personas/generate",
         data={"count": args.count}, api_key=config["api_key"]
     )
@@ -881,7 +1059,7 @@ def cmd_update_persona(args):
     if args.description:
         data["description"] = args.description
 
-    resp, status = api_call(
+    resp, status, _ = api_call(
         "PUT", f"/personas/{args.uuid}",
         data=data, api_key=config["api_key"]
     )
@@ -927,7 +1105,7 @@ def cmd_create_question(args):
     config = require_user_config()
     data = {"text": args.text}
 
-    resp, status = api_call(
+    resp, status, _ = api_call(
         "POST", f"/personas/{args.persona_uuid}/questions",
         data=data, api_key=config["api_key"]
     )
@@ -944,7 +1122,7 @@ def cmd_create_question(args):
 def cmd_generate_questions(args):
     """AI-generate questions (10 credits flat)."""
     config = require_user_config()
-    resp, status = api_call(
+    resp, status, _ = api_call(
         "POST", f"/personas/{args.persona_uuid}/questions/generate",
         data={"count": args.count}, api_key=config["api_key"]
     )
@@ -964,7 +1142,7 @@ def cmd_update_question(args):
     config = require_user_config()
     data = {"text": args.text}
 
-    resp, status = api_call(
+    resp, status, _ = api_call(
         "PUT", f"/questions/{args.uuid}",
         data=data, api_key=config["api_key"]
     )
@@ -1023,6 +1201,7 @@ def main():
     # High-level workflow commands
     subparsers.add_parser("status", help="Show account status and balance")
     subparsers.add_parser("account", help="Show account details (email, company)")
+    subparsers.add_parser("update", help="Update BotSee skill to latest version")
 
     signup_parser = subparsers.add_parser("signup", help="Signup for BotSee and get API key")
     signup_parser.add_argument("--email", help="Contact email (optional)")
@@ -1141,6 +1320,7 @@ def main():
     commands = {
         "status": cmd_status,
         "account": cmd_account,
+        "update": cmd_update,
         "signup": cmd_signup,
         "create-site": cmd_create_site,
         "config-show": cmd_config_show,
