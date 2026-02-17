@@ -12,7 +12,7 @@ Commands:
 
 **Workflow:**
 - /botsee                                  - Quick status and help
-- /botsee setup <domain> [--api-key KEY]   - Setup (creates account for new users)
+- /botsee signup [--email EMAIL] [--name NAME] [--company COMPANY] [--api-key KEY] - Get API key and create account
 - /botsee create-site <domain> [--types N]   - Save custom config
 - /botsee config-show                      - Display saved config
 - /botsee analyze                          - Run competitive analysis

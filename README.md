@@ -46,6 +46,43 @@ Restart Claude Code or reload skills.
 /botsee
 ```
 
+## Example Conversational Workflow
+
+Use these natural language prompts to guide Claude through the complete BotSee workflow:
+
+### Prompt 1: Install & Signup
+```
+Install the BotSee Skill from github.com/RivalSee/botsee-skill. Then sign me up for BotSee using my email user@example.com so I can analyze how AI search engines see my product.
+```
+
+### Prompt 2: Create Site with Structure
+```
+Create a BotSee site for https://myproduct.com with 1 customer type, 2 personas, and 5 questions per persona. Set it up so I can run a competitive analysis.
+```
+
+### Prompt 3: Analyze & Show Competitors
+```
+Run a competitive analysis and show me the full list of competitors mentioned by AI search engines, including their mention percentages and what contexts they appear in.
+```
+
+### Prompt 4: Show Keywords
+```
+Show me all the keywords that AI search engines associate with my product category, sorted by frequency.
+```
+
+### Prompt 5: Generate Blog Titles
+```
+Based on those keywords and competitor insights, give me 5 compelling blog post titles that would help us compete better in AI search results.
+```
+
+### Prompt 6: Write Blog Post
+```
+Write a full blog post for the first title, including our competitive position, opportunities, threats, and recommended actions based on the analysis data.
+```
+
+**Total cost:** ~725 credits ($7.25) | **Time:** ~15 minutes
+**Output:** Competitor rankings with percentages, keyword frequency analysis, and strategic blog content
+
 ## Commands
 
 ### Workflow Commands

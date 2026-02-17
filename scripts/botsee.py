@@ -48,7 +48,7 @@ TEXT_TRUNCATE_LEN = 80
 
 def api_call(method, endpoint, data=None, api_key=None, timeout=30):
     """Make an API call to BotSee. Returns (response_dict, http_status, update_available)."""
-    url = f"{BASE_URL}/v1{endpoint}"
+    url = f"{BASE_URL}/api/v1{endpoint}"
     headers = {"Content-Type": "application/json"}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
@@ -470,6 +470,13 @@ def signup_new(args, pending_signup_path):
         signup_data["contact_name"] = args.name
     if args.company:
         signup_data["company_name"] = args.company
+    if hasattr(args, 'webhook_url') and args.webhook_url:
+        signup_data["webhook_url"] = args.webhook_url
+
+    # Signal agent-based/crypto signup (no email dialogs)
+    if hasattr(args, 'no_email') and args.no_email:
+        signup_data["agent_based"] = True
+        signup_data["skip_email_collection"] = True
 
     # Call signup API (contact fields are optional)
     resp, status, update_available = api_call("POST", "/signup", data=signup_data)
@@ -507,8 +514,42 @@ def signup_new(args, pending_signup_path):
     print("After completing signup, paste the text provided on the website here.")
 
 
+def signup_save_key(api_key):
+    """Save API key directly without signup flow."""
+    # Validate API key format
+    if not api_key.startswith("bts_"):
+        print("Error: API key must start with 'bts_'", file=sys.stderr)
+        sys.exit(1)
+
+    # Save to config
+    config_path = os.path.join(os.path.expanduser("~/.botsee"), "config.json")
+    os.makedirs(os.path.dirname(config_path), exist_ok=True)
+
+    # Load existing config or create new
+    if os.path.exists(config_path):
+        with open(config_path, "r") as f:
+            config = json.load(f)
+    else:
+        config = {}
+
+    # Update API key
+    config["api_key"] = api_key
+
+    # Write back
+    with open(config_path, "w") as f:
+        json.dump(config, f, indent=2)
+    os.chmod(config_path, 0o600)
+
+    print("✓ API key saved successfully")
+    print("\nNext step: Run /botsee create-site <domain> to get started")
+
+
 def cmd_signup(args):
     """Signup for BotSee: create account and get API key."""
+    # If API key provided directly, save it and skip signup
+    if hasattr(args, 'api_key') and args.api_key:
+        return signup_save_key(args.api_key)
+
     pending_signup_path = os.path.join(os.path.expanduser("~/.botsee"), "pending_signup.json")
     if os.path.exists(pending_signup_path):
         return signup_resume(pending_signup_path)
@@ -1189,6 +1230,85 @@ def cmd_results_responses(args):
     print(json.dumps(responses, indent=2))
 
 
+def cmd_list_analyses(args):
+    """List analysis runs for a site."""
+    config = require_user_config()
+    site_uuid = args.site_uuid or config.get("site_uuid")
+
+    if not site_uuid:
+        print("Error: No site specified. Use --site-uuid or run use-site first.", file=sys.stderr)
+        sys.exit(1)
+
+    # Build query params
+    params = {}
+    if args.limit:
+        params["limit"] = args.limit
+    if args.cursor:
+        params["cursor"] = args.cursor
+    if args.persona_uuid:
+        params["persona_uuid"] = args.persona_uuid
+    if args.model:
+        params["model"] = args.model
+
+    resp, status, update_available = api_call("GET", f"/sites/{site_uuid}/analysis", params=params)
+
+    if status != HTTP_OK:
+        print(f"Failed to list analyses (HTTP {status}): {resp}", file=sys.stderr)
+        sys.exit(1)
+
+    # Show update notification
+    if update_available:
+        show_update_notification(update_available)
+
+    # Display analyses
+    analyses = resp.get("analyses", [])
+    if not analyses:
+        print("No analyses found.")
+        return
+
+    print(f"Analysis runs for site {site_uuid}:\n")
+    for analysis in analyses:
+        status_emoji = "✓" if analysis["status"] == "completed" else "⋯"
+        models_str = ", ".join(analysis.get("models", []))
+        print(f"{status_emoji} {analysis['uuid']}")
+        print(f"   Status: {analysis['status']}")
+        print(f"   Models: {models_str}")
+        print(f"   Credits: {analysis.get('credits_used', 0)}")
+        print(f"   Responses: {analysis.get('response_count', 0)}")
+        print(f"   Started: {analysis['started_at']}")
+        if analysis.get('completed_at'):
+            print(f"   Completed: {analysis['completed_at']}")
+        print()
+
+    # Show pagination
+    if resp.get("cursor"):
+        print(f"More results available. Use --cursor {resp['cursor']}")
+
+
+def cmd_get_question_results(args):
+    """Get analysis results for a specific question."""
+    require_user_config()
+    question_uuid = args.uuid
+
+    # Build query params
+    params = {}
+    if args.fields:
+        params["fields"] = args.fields
+
+    resp, status, update_available = api_call("GET", f"/questions/{question_uuid}/results", params=params)
+
+    if status != HTTP_OK:
+        print(f"Failed to get question results (HTTP {status}): {resp}", file=sys.stderr)
+        sys.exit(1)
+
+    # Show update notification
+    if update_available:
+        show_update_notification(update_available)
+
+    # Display results
+    print(json.dumps(resp, indent=2))
+
+
 # --- Main ---
 
 
@@ -1207,6 +1327,9 @@ def main():
     signup_parser.add_argument("--email", help="Contact email (optional)")
     signup_parser.add_argument("--name", help="Contact name (optional)")
     signup_parser.add_argument("--company", help="Company name (optional)")
+    signup_parser.add_argument("--api-key", help="API key if you already have one (skips signup flow)")
+    signup_parser.add_argument("--webhook-url", help="Webhook URL for signup completion notification")
+    signup_parser.add_argument("--no-email", action="store_true", help="Agent-based signup without email (for crypto payments)")
 
     create_site_parser = subparsers.add_parser("create-site", help="Create site and generate content")
     create_site_parser.add_argument("domain", help="Website URL to analyze")
@@ -1315,6 +1438,19 @@ def main():
     results_resp_parser = subparsers.add_parser("results-responses", help="Get raw responses")
     results_resp_parser.add_argument("analysis_uuid", help="Analysis UUID")
 
+    # Analysis listing
+    list_analyses_parser = subparsers.add_parser("list-analyses", help="List analysis runs for a site")
+    list_analyses_parser.add_argument("--site-uuid", help="Site UUID (defaults to active site)")
+    list_analyses_parser.add_argument("--limit", type=int, help="Max results to return")
+    list_analyses_parser.add_argument("--cursor", help="Pagination cursor")
+    list_analyses_parser.add_argument("--persona-uuid", help="Filter by persona")
+    list_analyses_parser.add_argument("--model", help="Filter by model")
+
+    # Question results
+    question_results_parser = subparsers.add_parser("get-question-results", help="Get analysis results for a specific question")
+    question_results_parser.add_argument("uuid", help="Question UUID")
+    question_results_parser.add_argument("--fields", help="Comma-separated fields: keywords,competitors,sources,responses")
+
     args = parser.parse_args()
 
     commands = {
@@ -1352,6 +1488,8 @@ def main():
         "results-keywords": cmd_results_keywords,
         "results-sources": cmd_results_sources,
         "results-responses": cmd_results_responses,
+        "list-analyses": cmd_list_analyses,
+        "get-question-results": cmd_get_question_results,
     }
 
     if args.command is None:
