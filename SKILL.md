@@ -12,7 +12,10 @@ Commands:
 
 **Workflow:**
 - /botsee                                  - Quick status and help
-- /botsee signup [--email EMAIL] [--name NAME] [--company COMPANY] [--api-key KEY] - Get API key and create account
+- /botsee signup [--email EMAIL] [--name NAME] [--company COMPANY] [--api-key KEY] [--payment-method stripe|usdc] [--crypto] - Signup with credit card by default, or prepare USDC signup
+- /botsee signup-pay-usdc --amount-cents N --from-address 0x... [--token TOKEN] [--tx-hash 0x...] - Start USDC payment for signup on Base mainnet
+- /botsee signup-status [--token TOKEN]    - Check signup completion and save API key
+- /botsee topup-usdc --amount-cents N --from-address 0x... [--tx-hash 0x...] - Add credits with USDC on Base mainnet
 - /botsee create-site <domain> [--types N]   - Save custom config
 - /botsee config-show                      - Display saved config
 - /botsee analyze                          - Run competitive analysis
@@ -64,7 +67,7 @@ When user invokes a BotSee command, run the corresponding Python script. All com
 python3 ~/.claude/skills/botsee/scripts/botsee.py status
 ```
 
-### /botsee signup [--email EMAIL] [--name NAME] [--company COMPANY] [--api-key KEY]
+### /botsee signup [--email EMAIL] [--name NAME] [--company COMPANY] [--api-key KEY] [--payment-method stripe|usdc] [--crypto]
 
 **New user signup flow:**
 
@@ -74,6 +77,7 @@ python3 ~/.claude/skills/botsee/scripts/botsee.py signup
 ```
 
 This displays a signup URL. Tell the user: "Visit this URL to complete signup and get your API key. Then paste your API key here."
+This is the **credit card signup flow**.
 
 **Step 2: User pastes API key in conversation**
 
@@ -119,6 +123,42 @@ python3 ~/.claude/skills/botsee/scripts/botsee.py signup --api-key <key>
 **What happens:**
 1. Validates API key
 2. Saves API key to `~/.botsee/config.json`
+
+**Crypto flow (USDC on Base):**
+```bash
+python3 ~/.claude/skills/botsee/scripts/botsee.py signup --crypto
+python3 ~/.claude/skills/botsee/scripts/botsee.py signup-pay-usdc --amount-cents 250 --from-address 0x...
+python3 ~/.claude/skills/botsee/scripts/botsee.py signup-status
+```
+
+USDC network:
+- `base-mainnet` (Chain ID 8453)
+
+### /botsee signup-pay-usdc --amount-cents N --from-address 0x... [--token TOKEN] [--tx-hash 0x...]
+
+```bash
+python3 ~/.claude/skills/botsee/scripts/botsee.py signup-pay-usdc --amount-cents 5000 --from-address 0x1234...
+```
+
+Use `--payment <proof>` to send x402 `payment` header when retrying after HTTP 402.
+Use `--tx-hash <0x...>` to auto-build transaction-based x402 payload (`txHash`, `network`, `asset`, `amount`, `payer`).
+
+### /botsee signup-status [--token TOKEN]
+
+```bash
+python3 ~/.claude/skills/botsee/scripts/botsee.py signup-status
+```
+
+Saves API key to `~/.botsee/config.json` automatically once signup is completed.
+
+### /botsee topup-usdc --amount-cents N --from-address 0x... [--tx-hash 0x...]
+
+```bash
+python3 ~/.claude/skills/botsee/scripts/botsee.py topup-usdc --amount-cents 5000 --from-address 0x1234...
+```
+
+Use `--payment <proof>` to send x402 `payment` header when retrying after HTTP 402.
+Use `--tx-hash <0x...>` to auto-build transaction-based x402 payload (`txHash`, `network`, `asset`, `amount`, `payer`).
 
 ### /botsee create-site <domain> [--types T] [--personas P] [--questions Q]
 
@@ -368,10 +408,10 @@ This skill is designed for **non-interactive agent usage**. All commands accept 
 
 **1. Signup Flow Requires Human Intervention**
 
-For **new users** without an API key, the setup command creates a signup token and displays a URL:
+For **new users** without an API key, the signup command creates a signup token and displays a URL:
 ```bash
-/botsee setup <domain>
-# Outputs signup URL, waits up to 5 minutes for completion
+/botsee signup
+# Outputs signup URL for browser completion
 ```
 
 **Agents should:**
@@ -381,9 +421,9 @@ For **new users** without an API key, the setup command creates a signup token a
 
 **2. Async Operations with Polling**
 
-Two commands poll for completion:
-- `/botsee setup` (signup only): 5 minute timeout
-- `/botsee analyze`: 10 minute timeout
+Two commands can involve waiting/polling:
+- `/botsee signup-status` (checks signup completion)
+- `/botsee analyze`: up to 10 minute timeout
 
 Commands will block until complete or timeout. No intermediate progress updates.
 
@@ -450,19 +490,22 @@ All errors exit with code 1 and print to stderr. Error messages include:
 # 1. Check status (discover state)
 /botsee
 
-# 2. Setup if needed (requires API key)
-/botsee setup https://example.com --api-key bts_live_abc123
+# 2. Save API key if provided by user
+/botsee signup --api-key bts_live_abc123
 
-# 3. Run analysis (captures UUID)
+# 3. Create a site
+/botsee create-site https://example.com
+
+# 4. Run analysis (captures UUID)
 analysis_output=$(/botsee analyze)
 uuid=$(echo "$analysis_output" | grep -oP '(?<=Analysis started: )\S+')
 
-# 4. View results
+# 5. View results
 /botsee results-competitors "$uuid"
 
-# 5. Generate content
+# 6. Generate content
 /botsee content
 
-# 6. Check final balance
+# 7. Check final balance
 /botsee
 ```

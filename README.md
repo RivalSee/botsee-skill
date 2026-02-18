@@ -19,10 +19,10 @@ Restart Claude Code or reload skills.
 - Claude Code
 - Python 3 (pre-installed on macOS)
 
-## Quick Start
+## Quick Start (Credit Card)
 
 ```bash
-# Step 1: Get signup URL
+# Step 1: Get signup URL (credit card flow)
 /botsee signup
 
 # Step 2: Visit the URL in browser, complete signup
@@ -44,6 +44,37 @@ Restart Claude Code or reload skills.
 
 # Check status and balance
 /botsee
+```
+
+## Quick Start (USDC on Base)
+
+```bash
+# Step 1: Create signup token for USDC flow
+/botsee signup --crypto
+
+# Step 2: Initiate USDC payment on Base
+/botsee signup-pay-usdc --amount-cents 250 --from-address 0xYOUR_WALLET
+
+# Step 3: Check completion and save API key when ready
+/botsee signup-status
+
+# Step 4: Create site and generate content
+/botsee create-site https://example.com
+
+# Optional: Customize generation counts
+/botsee create-site https://example.com --types 3 --personas 2 --questions 10
+
+# Run analysis (~660 credits)
+/botsee analyze
+
+# Generate blog post (15 credits)
+/botsee content
+
+# Check status and balance
+/botsee
+
+# Optional: Top up credits later with USDC
+/botsee topup-usdc --amount-cents 5000 --from-address 0xYOUR_WALLET
 ```
 
 ## Example Conversational Workflow
@@ -100,6 +131,7 @@ Shows current status, balance, and available commands.
 
 #### `/botsee signup`
 Signup for BotSee and get your API key.
+Default behavior is **Signup with Credit Card** (Stripe web flow).
 
 **New user (no API key):**
 ```bash
@@ -134,6 +166,63 @@ Contact fields are optional - the API will use defaults if not provided.
 Validates and saves your existing API key.
 
 **Cost:** Free (signup doesn't consume credits)
+
+**Signup with USDC (Base):**
+```bash
+# Create signup token with USDC payment method
+/botsee signup --crypto
+
+# Start USDC payment (Base mainnet)
+/botsee signup-pay-usdc --amount-cents 250 --from-address 0xYOUR_WALLET
+
+# Poll signup status (saves API key on completion)
+/botsee signup-status
+```
+
+Network:
+- `base-mainnet` (Chain ID 8453, production)
+
+#### `/botsee signup-pay-usdc`
+Initiate USDC payment for a signup token (`POST /api/v1/signup/:token/pay-usdc`).
+
+```bash
+/botsee signup-pay-usdc --token <setup_token> --amount-cents 5000 --from-address 0xYOUR_WALLET
+```
+
+Optional:
+- `--payment <proof>` x402 `payment` header value when retrying after HTTP 402
+- `--tx-hash 0x...` build transaction-based x402 payload (`txHash`) automatically
+- `--asset USDC` asset value for tx-hash payload (default: `USDC`)
+
+Transaction-hash example:
+```bash
+/botsee signup-pay-usdc --token <setup_token> --amount-cents 5000 --from-address 0xYOUR_WALLET --tx-hash 0xYOUR_TX_HASH
+```
+
+#### `/botsee signup-status`
+Check signup status and automatically save API key when completed.
+
+```bash
+/botsee signup-status
+/botsee signup-status --token <setup_token>
+```
+
+#### `/botsee topup-usdc`
+Add credits via USDC on Base (`POST /api/v1/billing/topups/usdc`).
+
+```bash
+/botsee topup-usdc --amount-cents 5000 --from-address 0xYOUR_WALLET
+```
+
+Optional:
+- `--payment <proof>` x402 `payment` header value when retrying after HTTP 402
+- `--tx-hash 0x...` build transaction-based x402 payload (`txHash`) automatically
+- `--asset USDC` asset value for tx-hash payload (default: `USDC`)
+
+Transaction-hash example:
+```bash
+/botsee topup-usdc --amount-cents 5000 --from-address 0xYOUR_WALLET --tx-hash 0xYOUR_TX_HASH
+```
 
 #### `/botsee create-site <domain>`
 Create site and generate content.
@@ -695,13 +784,18 @@ rm .context/botsee-config.json  # Remove workspace config
 
 **"Insufficient credits"**
 - **Cause:** Account balance too low
-- **Solution:** Add credits at https://botsee.io/billing
+- **Solution:** Use `/botsee topup-usdc --amount-cents 250 --from-address 0x...` or add credits at https://botsee.io/billing
 - **Check:** Run `/botsee` to view current balance
 
 **Analysis uses more credits than expected**
 - **Cause:** More questions generated than planned
 - **Check:** Run `/botsee list-questions` to count total questions
 - **Solution:** Reduce question count or delete unnecessary questions
+
+**"HTTP 402 Payment required"**
+- **Cause:** Endpoint requires x402 payment proof or account has insufficient credits
+- **Solution:** Top up with `/botsee topup-usdc ...` and retry
+- **Optional:** Retry USDC payment endpoints with `--payment <proof>` to send x402 `payment` header
 
 ### Connection Issues
 

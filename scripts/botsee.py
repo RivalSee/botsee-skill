@@ -2,6 +2,7 @@
 """BotSee CLI — AI-powered competitive intelligence via BotSee API."""
 
 import argparse
+import base64
 import json
 import os
 import re
@@ -11,8 +12,9 @@ import sys
 import tarfile
 import tempfile
 import time
-import urllib.request
 import urllib.error
+import urllib.parse
+import urllib.request
 from pathlib import Path
 
 # Version
@@ -24,6 +26,7 @@ BASE_URL = "https://botsee.io"
 # File Paths
 USER_CONFIG = Path.home() / ".botsee" / "config.json"
 WORKSPACE_CONFIG = Path(".context") / "botsee-config.json"
+PENDING_SIGNUP = Path.home() / ".botsee" / "pending_signup.json"
 
 # Polling Configuration
 POLL_INTERVAL = 3  # seconds
@@ -35,6 +38,7 @@ HTTP_OK = 200
 HTTP_CREATED = 201
 HTTP_ACCEPTED = 202
 HTTP_NO_CONTENT = 204
+HTTP_PAYMENT_REQUIRED = 402
 
 # Validation Ranges
 TYPES_MIN, TYPES_MAX = 1, 3
@@ -45,13 +49,69 @@ QUESTIONS_MIN, QUESTIONS_MAX = 3, 10
 DESC_TRUNCATE_LEN = 50
 TEXT_TRUNCATE_LEN = 80
 
+# USDC / x402
+USDC_MIN_CENTS = 250
+USDC_MAX_CENTS = 100000
+USDC_NETWORK_MAINNET = "base-mainnet"
+USDC_ASSET_DEFAULT = "USDC"
+PAYMENT_HEADER_REQUIRED = "payment-required"
+PAYMENT_HEADER_REQUEST = "payment"
+PAYMENT_HEADER_RESPONSE = "payment-response"
 
-def api_call(method, endpoint, data=None, api_key=None, timeout=30):
+
+def extract_payment_headers(headers):
+    """Extract x402-related headers from an HTTP headers object."""
+    if not headers:
+        return {}
+
+    payment_headers = {}
+    for key in (PAYMENT_HEADER_REQUIRED, PAYMENT_HEADER_RESPONSE):
+        value = headers.get(key)
+        if value:
+            payment_headers[key] = value
+    return payment_headers
+
+
+def show_payment_headers(response_data):
+    """Display x402 headers if present in API response payload."""
+    payment_headers = response_data.get("_payment_headers") if isinstance(response_data, dict) else None
+    if not payment_headers:
+        return
+
+    print("x402 payment headers:")
+    if payment_headers.get(PAYMENT_HEADER_REQUIRED):
+        print(f"  {PAYMENT_HEADER_REQUIRED}: {payment_headers[PAYMENT_HEADER_REQUIRED]}")
+    if payment_headers.get(PAYMENT_HEADER_RESPONSE):
+        print(f"  {PAYMENT_HEADER_RESPONSE}: {payment_headers[PAYMENT_HEADER_RESPONSE]}")
+
+
+def show_payment_required_help(response_data):
+    """Display a concise hint when an endpoint requires payment."""
+    if not isinstance(response_data, dict):
+        return
+
+    if response_data.get("_payment_headers"):
+        print("")
+        show_payment_headers(response_data)
+
+    print("")
+    print("Payment required (HTTP 402).")
+    print("Top up credits with USDC on Base:")
+    print(f"  /botsee topup-usdc --amount-cents {USDC_MIN_CENTS} --from-address 0x...")
+
+
+def api_call(method, endpoint, data=None, api_key=None, timeout=30, params=None, extra_headers=None):
     """Make an API call to BotSee. Returns (response_dict, http_status, update_available)."""
     url = f"{BASE_URL}/api/v1{endpoint}"
+    if params:
+        query = urllib.parse.urlencode(params)
+        url = f"{url}?{query}"
+
     headers = {"Content-Type": "application/json"}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
+    if extra_headers:
+        headers.update(extra_headers)
 
     # Add SKILL_VER to data payload
     if data is not None:
@@ -69,18 +129,27 @@ def api_call(method, endpoint, data=None, api_key=None, timeout=30):
         with urllib.request.urlopen(req, timeout=timeout, context=ssl_context) as resp:
             raw = resp.read()
             response_data = json.loads(raw) if raw else {}
+            payment_headers = extract_payment_headers(resp.headers)
+            if payment_headers:
+                response_data["_payment_headers"] = payment_headers
             update_available = response_data.get("skill_update_available")
             return response_data, resp.status, update_available
     except urllib.error.HTTPError as e:
         raw = e.read()
+        payment_headers = extract_payment_headers(e.headers)
         try:
             error_data = json.loads(raw)
             # Sanitize error messages - don't leak API keys
             if "api_key" in str(error_data).lower():
                 error_data = {"error": "Authentication failed"}
+            if payment_headers:
+                error_data["_payment_headers"] = payment_headers
             return error_data, e.code, None
         except (json.JSONDecodeError, ValueError):
-            return {"error": "Request failed"}, e.code, None
+            error_data = {"error": "Request failed"}
+            if payment_headers:
+                error_data["_payment_headers"] = payment_headers
+            return error_data, e.code, None
     except urllib.error.URLError as e:
         print(f"Connection error: {e.reason}", file=sys.stderr)
         sys.exit(1)
@@ -243,13 +312,111 @@ def normalize_domain(domain):
     return domain
 
 
+def normalize_endpoint(endpoint):
+    """Normalize endpoint paths to /<resource> without /api/v1 prefix."""
+    if endpoint.startswith(BASE_URL):
+        endpoint = endpoint[len(BASE_URL):]
+    if endpoint.startswith("/api/v1/"):
+        endpoint = endpoint[len("/api/v1"):]
+    return endpoint
+
+
+def parse_comma_separated(value):
+    """Parse a comma-separated argument into a list."""
+    if not value:
+        return []
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+
 def require_user_config():
     """Load user config or exit with error."""
     config = load_user_config()
     if not config:
-        print("No BotSee config found. Run: /botsee setup <domain>", file=sys.stderr)
+        print("No BotSee config found. Run: /botsee signup", file=sys.stderr)
         sys.exit(1)
     return config
+
+
+def load_pending_signup():
+    """Load pending signup metadata."""
+    if not PENDING_SIGNUP.exists():
+        return None
+    with open(PENDING_SIGNUP) as f:
+        return json.load(f)
+
+
+def save_pending_signup(data):
+    """Persist pending signup metadata with secure permissions."""
+    PENDING_SIGNUP.parent.mkdir(parents=True, exist_ok=True)
+    with open(PENDING_SIGNUP, "w") as f:
+        json.dump(data, f, indent=2)
+    os.chmod(PENDING_SIGNUP, 0o600)
+
+
+def clear_pending_signup():
+    """Delete pending signup metadata."""
+    if PENDING_SIGNUP.exists():
+        PENDING_SIGNUP.unlink()
+
+
+def resolve_signup_token(explicit_token=None):
+    """Resolve signup token from explicit argument or pending signup state."""
+    if explicit_token:
+        return explicit_token
+
+    pending = load_pending_signup()
+    if not pending:
+        print("No pending signup found. Run /botsee signup --crypto first.", file=sys.stderr)
+        sys.exit(1)
+
+    setup_token = pending.get("setup_token")
+    if not setup_token:
+        print("Pending signup has no setup token. Run /botsee signup again.", file=sys.stderr)
+        sys.exit(1)
+    return setup_token
+
+
+def show_usdc_payment_instructions(resp):
+    """Display payment instructions returned by signup/topup USDC endpoints."""
+    print("✅ USDC payment initialized")
+    print(f"   Network: {resp.get('network', '?')} (Chain ID: {resp.get('chain_id', '?')})")
+    print(f"   Amount: {resp.get('amount_usdc', '?')} USDC")
+    print(f"   Send to: {resp.get('pay_to_address', '?')}")
+    print(f"   USDC contract: {resp.get('usdc_contract', '?')}")
+
+    facilitator_url = resp.get("facilitator_url")
+    if facilitator_url:
+        print(f"   x402 facilitator: {facilitator_url}")
+
+    status_url = resp.get("status_url")
+    if status_url:
+        print(f"   Status endpoint: {status_url}")
+
+    payment_id = resp.get("payment_id") or resp.get("topup_id")
+    if payment_id:
+        print(f"   Payment ID: {payment_id}")
+
+    expires_at = resp.get("expires_at")
+    if expires_at:
+        print(f"   Expires at: {expires_at}")
+
+
+def build_txhash_payment_header(tx_hash, payer, amount_cents, asset=USDC_ASSET_DEFAULT):
+    """Build base64-encoded x402 transaction-based payment payload."""
+    payload = {
+        "txHash": tx_hash,
+        "network": USDC_NETWORK_MAINNET,
+        "asset": asset,
+        "amount": f"{amount_cents / 100:.2f}",
+        "payer": payer,
+    }
+    encoded = base64.b64encode(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
+    return encoded.decode("utf-8")
+
+
+def validate_tx_hash(tx_hash):
+    """Validate transaction hash format."""
+    return bool(re.match(r"^0x[a-fA-F0-9]{64}$", tx_hash))
 
 
 # --- Generic CRUD helpers (reduces duplication) ---
@@ -261,6 +428,8 @@ def api_get(endpoint, expected_status=HTTP_OK):
     resp, status, _ = api_call("GET", endpoint, api_key=config["api_key"])
     if status != expected_status:
         print(f"Failed (HTTP {status}): {resp}", file=sys.stderr)
+        if status == HTTP_PAYMENT_REQUIRED:
+            show_payment_required_help(resp)
         sys.exit(1)
     return resp
 
@@ -273,13 +442,15 @@ def api_delete(endpoint, resource_name, expected_status=HTTP_NO_CONTENT):
         print(f"✅ {resource_name} archived")
     else:
         print(f"Failed (HTTP {status}): {resp}", file=sys.stderr)
+        if status == HTTP_PAYMENT_REQUIRED:
+            show_payment_required_help(resp)
         sys.exit(1)
 
 
 # --- High-level workflow commands ---
 
 
-def cmd_status(_args):
+def cmd_status(args):
     """Show account status and balance."""
     config = load_user_config()
     if not config:
@@ -289,7 +460,22 @@ def cmd_status(_args):
         print("Learn more: https://botsee.io/docs")
         return
 
-    resp, status, update_available = api_call("GET", "/usage", api_key=config["api_key"])
+    usage_params = {}
+    if getattr(args, "limit", None):
+        usage_params["limit"] = args.limit
+    if getattr(args, "cursor", None):
+        usage_params["cursor"] = args.cursor
+    if getattr(args, "from_time", None):
+        usage_params["from"] = args.from_time
+    if getattr(args, "to_time", None):
+        usage_params["to"] = args.to_time
+
+    resp, status, update_available = api_call(
+        "GET",
+        "/usage",
+        api_key=config["api_key"],
+        params=usage_params or None,
+    )
     if status != HTTP_OK:
         print(f"API error ({status}). Run: /botsee signup", file=sys.stderr)
         sys.exit(1)
@@ -320,7 +506,9 @@ def cmd_status(_args):
     print("")
     print("Commands:")
     print("  /botsee account               - View account details")
-    print("  /botsee signup                - Get API key")
+    print("  /botsee signup                - Signup with credit card")
+    print("  /botsee signup --crypto       - Signup with USDC on Base")
+    print("  /botsee topup-usdc            - Add credits with USDC")
     print("  /botsee create-site <domain>  - Create site")
     print("  /botsee analyze               - Analyze website")
     print("  /botsee content               - Generate blog post")
@@ -367,7 +555,7 @@ def cmd_update(_args):
         # Use a lightweight endpoint (e.g., GET /sites)
         config = load_user_config()
         if not config:
-            print("No BotSee config found. Run: /botsee setup <domain>", file=sys.stderr)
+            print("No BotSee config found. Run: /botsee signup", file=sys.stderr)
             sys.exit(1)
 
         resp, status, update_available = api_call(
@@ -414,20 +602,22 @@ def cmd_update(_args):
         sys.exit(1)
 
 
-def signup_resume(pending_signup_path):
+def signup_resume():
     """Resume a pending signup by checking its status."""
     print("🤖 BotSee Signup")
     print("")
     print("⏳ Checking signup status...")
 
-    with open(pending_signup_path, "r") as f:
-        pending = json.load(f)
+    pending = load_pending_signup()
+    if not pending:
+        print("No pending signup found. Run /botsee signup.", file=sys.stderr)
+        sys.exit(1)
 
     status_url = pending.get("status_url")
     setup_token = pending.get("setup_token")
 
     # Check status once
-    poll_url = status_url if status_url else f"/signup/{setup_token}/status"
+    poll_url = normalize_endpoint(status_url) if status_url else f"/signup/{setup_token}/status"
     poll_resp, poll_status, _ = api_call("GET", poll_url)
 
     if poll_status == HTTP_OK:
@@ -439,14 +629,14 @@ def signup_resume(pending_signup_path):
             if api_key:
                 # Save API key and account info, clean up pending signup
                 save_user_config(api_key, None, contact_email, company_name)
-                os.remove(pending_signup_path)
+                clear_pending_signup()
 
                 print(f"✅ Signup complete!")
                 print("")
                 print(f"Next: /botsee create-site <domain>")
                 return
         elif signup_status == "expired":
-            os.remove(pending_signup_path)
+            clear_pending_signup()
             print("Signup token expired. Run /botsee signup again.", file=sys.stderr)
             sys.exit(1)
 
@@ -460,7 +650,7 @@ def signup_resume(pending_signup_path):
     sys.exit(1)  # Exit with error - signup incomplete
 
 
-def signup_new(args, pending_signup_path):
+def signup_new(args):
     """Create a new signup token and save for later completion."""
     # Build signup data with optional contact fields
     signup_data = {}
@@ -473,8 +663,14 @@ def signup_new(args, pending_signup_path):
     if hasattr(args, 'webhook_url') and args.webhook_url:
         signup_data["webhook_url"] = args.webhook_url
 
+    payment_method = getattr(args, "payment_method", None)
+    if getattr(args, "crypto", False):
+        payment_method = "usdc"
+    if payment_method:
+        signup_data["payment_method"] = payment_method
+
     # Signal agent-based/crypto signup (no email dialogs)
-    if hasattr(args, 'no_email') and args.no_email:
+    if hasattr(args, 'no_email') and (args.no_email or payment_method == "usdc"):
         signup_data["agent_based"] = True
         signup_data["skip_email_collection"] = True
 
@@ -492,6 +688,7 @@ def signup_new(args, pending_signup_path):
     setup_token = resp.get("setup_token")
     setup_url = resp.get("setup_url")
     status_url = resp.get("status_url")
+    returned_payment_method = resp.get("payment_method") or payment_method or "stripe"
 
     if not setup_token or not setup_url:
         print(f"Unexpected signup response: {resp}", file=sys.stderr)
@@ -499,19 +696,34 @@ def signup_new(args, pending_signup_path):
 
     # Show URL prominently and save for later (non-interactive default)
     print(f"")
-    print(f"Complete signup: {setup_url}")
-    print(f"")
+    if returned_payment_method == "usdc":
+        print("USDC signup token created.")
+        print(f"Setup URL: {setup_url}")
+        print("")
+        print("Next steps:")
+        print(
+            f"  /botsee signup-pay-usdc --token {setup_token} "
+            f"--amount-cents {USDC_MIN_CENTS} --from-address 0x..."
+        )
+        print(f"  /botsee signup-status --token {setup_token}")
+        print("")
+    else:
+        print("Credit card signup token created.")
+        print(f"Complete signup: {setup_url}")
+        print(f"")
 
     # Save pending signup (non-interactive mode - agent-friendly)
-    os.makedirs(os.path.dirname(pending_signup_path), exist_ok=True)
-    with open(pending_signup_path, "w") as f:
-        json.dump({
-            "setup_token": setup_token,
-            "setup_url": setup_url,
-            "status_url": status_url
-        }, f, indent=2)
-    os.chmod(pending_signup_path, 0o600)  # Secure permissions
-    print("After completing signup, paste the text provided on the website here.")
+    save_pending_signup({
+        "setup_token": setup_token,
+        "setup_url": setup_url,
+        "status_url": status_url,
+        "payment_method": returned_payment_method,
+    })
+
+    if returned_payment_method == "usdc":
+        print("For USDC on Base, initiate payment using /botsee signup-pay-usdc.")
+    else:
+        print("After completing signup, paste the text provided on the website here.")
 
 
 def signup_save_key(api_key):
@@ -550,11 +762,180 @@ def cmd_signup(args):
     if hasattr(args, 'api_key') and args.api_key:
         return signup_save_key(args.api_key)
 
-    pending_signup_path = os.path.join(os.path.expanduser("~/.botsee"), "pending_signup.json")
-    if os.path.exists(pending_signup_path):
-        return signup_resume(pending_signup_path)
+    if PENDING_SIGNUP.exists():
+        return signup_resume()
 
-    return signup_new(args, pending_signup_path)
+    return signup_new(args)
+
+
+def cmd_signup_pay_usdc(args):
+    """Initiate USDC payment for signup token."""
+    token = resolve_signup_token(args.token)
+
+    if not (USDC_MIN_CENTS <= args.amount_cents <= USDC_MAX_CENTS):
+        print(
+            f"amount-cents must be between {USDC_MIN_CENTS} and {USDC_MAX_CENTS}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    if not args.from_address.startswith("0x"):
+        print("from-address must be an EVM address starting with 0x", file=sys.stderr)
+        sys.exit(1)
+
+    if args.tx_hash and args.payment:
+        print("Use either --tx-hash or --payment, not both.", file=sys.stderr)
+        sys.exit(1)
+
+    payment_value = args.payment
+    if args.tx_hash:
+        if not validate_tx_hash(args.tx_hash):
+            print("tx-hash must be a 0x-prefixed 32-byte hex hash.", file=sys.stderr)
+            sys.exit(1)
+        payment_value = build_txhash_payment_header(
+            tx_hash=args.tx_hash,
+            payer=args.from_address,
+            amount_cents=args.amount_cents,
+            asset=args.asset,
+        )
+        print("Using transaction-based x402 payment payload (txHash).")
+
+    payment_headers = {PAYMENT_HEADER_REQUEST: payment_value} if payment_value else None
+    payload = {
+        "amount_cents": args.amount_cents,
+        "from_address": args.from_address,
+        "network": USDC_NETWORK_MAINNET,
+    }
+    resp, status, _ = api_call(
+        "POST",
+        f"/signup/{token}/pay-usdc",
+        data=payload,
+        extra_headers=payment_headers,
+    )
+    if status not in (HTTP_OK, HTTP_CREATED, HTTP_ACCEPTED):
+        print(f"USDC signup payment failed (HTTP {status}): {resp}", file=sys.stderr)
+        if status == HTTP_PAYMENT_REQUIRED:
+            show_payment_required_help(resp)
+        sys.exit(1)
+
+    show_usdc_payment_instructions(resp)
+    show_payment_headers(resp)
+    print("")
+    print(f"Then check status: /botsee signup-status --token {token}")
+
+    pending = load_pending_signup() or {}
+    pending.update({
+        "setup_token": token,
+        "status_url": resp.get("status_url", pending.get("status_url")),
+        "payment_method": "usdc",
+    })
+    save_pending_signup(pending)
+
+
+def cmd_signup_status(args):
+    """Check signup token status and save API key when complete."""
+    token = resolve_signup_token(args.token)
+    resp, status, _ = api_call("GET", f"/signup/{token}/status")
+
+    if status != HTTP_OK:
+        print(f"Signup status check failed (HTTP {status}): {resp}", file=sys.stderr)
+        if status == HTTP_PAYMENT_REQUIRED:
+            show_payment_required_help(resp)
+        sys.exit(1)
+
+    signup_status = resp.get("status", "unknown")
+    payment_method = resp.get("payment_method")
+    print(f"Signup status: {signup_status}")
+    if payment_method:
+        print(f"Payment method: {payment_method}")
+
+    if signup_status == "completed":
+        api_key = resp.get("api_key")
+        if not api_key:
+            print("Signup completed but API key was not returned.", file=sys.stderr)
+            sys.exit(1)
+
+        save_user_config(
+            api_key,
+            None,
+            resp.get("contact_email"),
+            resp.get("company_name"),
+        )
+        pending = load_pending_signup()
+        if pending and pending.get("setup_token") == token:
+            clear_pending_signup()
+
+        print("✅ Signup complete. API key saved.")
+        print("Next: /botsee create-site <domain>")
+        return
+
+    if signup_status == "expired":
+        pending = load_pending_signup()
+        if pending and pending.get("setup_token") == token:
+            clear_pending_signup()
+        print("Signup token expired. Run /botsee signup again.", file=sys.stderr)
+        sys.exit(1)
+
+    pending = load_pending_signup()
+    if pending and pending.get("setup_url"):
+        print(f"Complete in browser: {pending['setup_url']}")
+
+
+def cmd_topup_usdc(args):
+    """Initiate USDC top-up for organization credits."""
+    config = require_user_config()
+
+    if not (USDC_MIN_CENTS <= args.amount_cents <= USDC_MAX_CENTS):
+        print(
+            f"amount-cents must be between {USDC_MIN_CENTS} and {USDC_MAX_CENTS}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    if not args.from_address.startswith("0x"):
+        print("from-address must be an EVM address starting with 0x", file=sys.stderr)
+        sys.exit(1)
+
+    if args.tx_hash and args.payment:
+        print("Use either --tx-hash or --payment, not both.", file=sys.stderr)
+        sys.exit(1)
+
+    payment_value = args.payment
+    if args.tx_hash:
+        if not validate_tx_hash(args.tx_hash):
+            print("tx-hash must be a 0x-prefixed 32-byte hex hash.", file=sys.stderr)
+            sys.exit(1)
+        payment_value = build_txhash_payment_header(
+            tx_hash=args.tx_hash,
+            payer=args.from_address,
+            amount_cents=args.amount_cents,
+            asset=args.asset,
+        )
+        print("Using transaction-based x402 payment payload (txHash).")
+
+    payment_headers = {PAYMENT_HEADER_REQUEST: payment_value} if payment_value else None
+    resp, status, _ = api_call(
+        "POST",
+        "/billing/topups/usdc",
+        data={
+            "amount_cents": args.amount_cents,
+            "from_address": args.from_address,
+            "network": USDC_NETWORK_MAINNET,
+        },
+        api_key=config["api_key"],
+        extra_headers=payment_headers,
+    )
+    if status not in (HTTP_OK, HTTP_CREATED, HTTP_ACCEPTED):
+        print(f"USDC top-up failed (HTTP {status}): {resp}", file=sys.stderr)
+        if status == HTTP_PAYMENT_REQUIRED:
+            show_payment_required_help(resp)
+        sys.exit(1)
+
+    show_usdc_payment_instructions(resp)
+    show_payment_headers(resp)
+    credits = resp.get("credits")
+    if credits is not None:
+        print(f"Credits to add on confirmation: {credits}")
 
 
 def cmd_create_site(args):
@@ -702,7 +1083,19 @@ def cmd_analyze(args):
 
     # Start analysis
     print("⏳ Starting analysis...")
-    resp, status, update_available = api_call("POST", "/analysis", data={"site_uuid": site_uuid}, api_key=api_key)
+    analysis_payload = {"site_uuid": site_uuid}
+    if args.scope:
+        analysis_payload["scope"] = args.scope
+    models = parse_comma_separated(args.models)
+    if models:
+        analysis_payload["models"] = models
+
+    resp, status, update_available = api_call(
+        "POST",
+        "/analysis",
+        data=analysis_payload,
+        api_key=api_key,
+    )
     if status not in (200, 201, 202):
         print(f"Analysis failed (HTTP {status}): {resp}", file=sys.stderr)
         sys.exit(1)
@@ -808,14 +1201,19 @@ def cmd_analyze(args):
     print(f"💰 Remaining: {balance} credits")
 
 
-def cmd_content(_args):
+def cmd_content(args):
     """Generate blog post from latest analysis."""
     config = require_user_config()
     api_key = config["api_key"]
     site_uuid = config["site_uuid"]
 
     # Get latest analysis
-    resp, status, _ = api_call("GET", f"/sites/{site_uuid}/analysis?limit=1", api_key=api_key)
+    resp, status, _ = api_call(
+        "GET",
+        f"/sites/{site_uuid}/analysis",
+        api_key=api_key,
+        params={"limit": 1},
+    )
     if status != 200:
         print(f"Failed to fetch analyses (HTTP {status})", file=sys.stderr)
         sys.exit(1)
@@ -828,9 +1226,15 @@ def cmd_content(_args):
     analysis_uuid = analyses[0].get("uuid")
 
     print("⏳ Generating blog post...")
+    content_payload = {}
+    if args.question_uuid:
+        content_payload["question_uuid"] = args.question_uuid
+    if args.provider:
+        content_payload["provider"] = args.provider
+
     resp, status, _ = api_call(
         "POST", f"/analysis/{analysis_uuid}/content",
-        data={}, api_key=api_key
+        data=content_payload, api_key=api_key
     )
     if status not in (200, 201):
         print(f"Content generation failed (HTTP {status}): {resp}", file=sys.stderr)
@@ -856,10 +1260,23 @@ def cmd_content(_args):
 # --- Sites CRUD ---
 
 
-def cmd_list_sites(_args):
+def cmd_list_sites(args):
     """List all sites."""
     config = require_user_config()
-    resp, status, update_available = api_call("GET", "/sites", api_key=config["api_key"])
+    params = {}
+    if args.limit:
+        params["limit"] = args.limit
+    if args.cursor:
+        params["cursor"] = args.cursor
+    if args.include_archived:
+        params["include_archived"] = "true"
+
+    resp, status, update_available = api_call(
+        "GET",
+        "/sites",
+        api_key=config["api_key"],
+        params=params or None,
+    )
     if status != 200:
         print(f"Failed (HTTP {status}): {resp}", file=sys.stderr)
         sys.exit(1)
@@ -1130,7 +1547,7 @@ def cmd_list_questions(args):
     print(f"Questions ({len(questions)}):")
     for q in questions:
         uuid = q.get("uuid", "?")
-        text = q.get("text", "?")[:80]
+        text = (q.get("text") or q.get("question") or "?")[:80]
         print(f"  {uuid[:8]}... - {text}")
 
 
@@ -1144,7 +1561,8 @@ def cmd_get_question(args):
 def cmd_create_question(args):
     """Create a question manually (FREE)."""
     config = require_user_config()
-    data = {"text": args.text}
+    # Send both keys for compatibility across API versions/docs examples.
+    data = {"question": args.text, "text": args.text}
 
     resp, status, _ = api_call(
         "POST", f"/personas/{args.persona_uuid}/questions",
@@ -1174,14 +1592,23 @@ def cmd_generate_questions(args):
     questions = resp.get("questions", [])
     print(f"✅ Generated {len(questions)} question(s)")
     for q in questions:
-        text = q.get("text", "?")[:80]
+        text = (q.get("text") or q.get("question") or "?")[:80]
         print(f"  • {text}")
 
 
 def cmd_update_question(args):
     """Update a question."""
     config = require_user_config()
-    data = {"text": args.text}
+    data = {}
+    if args.text:
+        # Send both keys for compatibility across API versions/docs examples.
+        data["question"] = args.text
+        data["text"] = args.text
+    if args.priority:
+        data["priority"] = args.priority
+    if not data:
+        print("Provide --text and/or --priority.", file=sys.stderr)
+        sys.exit(1)
 
     resp, status, _ = api_call(
         "PUT", f"/questions/{args.uuid}",
@@ -1249,8 +1676,17 @@ def cmd_list_analyses(args):
         params["persona_uuid"] = args.persona_uuid
     if args.model:
         params["model"] = args.model
+    if args.from_time:
+        params["from"] = args.from_time
+    if args.to_time:
+        params["to"] = args.to_time
 
-    resp, status, update_available = api_call("GET", f"/sites/{site_uuid}/analysis", params=params)
+    resp, status, update_available = api_call(
+        "GET",
+        f"/sites/{site_uuid}/analysis",
+        api_key=config["api_key"],
+        params=params,
+    )
 
     if status != HTTP_OK:
         print(f"Failed to list analyses (HTTP {status}): {resp}", file=sys.stderr)
@@ -1287,7 +1723,7 @@ def cmd_list_analyses(args):
 
 def cmd_get_question_results(args):
     """Get analysis results for a specific question."""
-    require_user_config()
+    config = require_user_config()
     question_uuid = args.uuid
 
     # Build query params
@@ -1295,7 +1731,12 @@ def cmd_get_question_results(args):
     if args.fields:
         params["fields"] = args.fields
 
-    resp, status, update_available = api_call("GET", f"/questions/{question_uuid}/results", params=params)
+    resp, status, update_available = api_call(
+        "GET",
+        f"/questions/{question_uuid}/results",
+        api_key=config["api_key"],
+        params=params,
+    )
 
     if status != HTTP_OK:
         print(f"Failed to get question results (HTTP {status}): {resp}", file=sys.stderr)
@@ -1319,17 +1760,67 @@ def main():
     subparsers = parser.add_subparsers(dest="command")
 
     # High-level workflow commands
-    subparsers.add_parser("status", help="Show account status and balance")
+    status_parser = subparsers.add_parser("status", help="Show account status and balance")
+    status_parser.add_argument("--limit", type=int, help="Max usage events to return")
+    status_parser.add_argument("--cursor", help="Usage pagination cursor")
+    status_parser.add_argument("--from", dest="from_time", help="Usage window start timestamp")
+    status_parser.add_argument("--to", dest="to_time", help="Usage window end timestamp")
     subparsers.add_parser("account", help="Show account details (email, company)")
     subparsers.add_parser("update", help="Update BotSee skill to latest version")
 
-    signup_parser = subparsers.add_parser("signup", help="Signup for BotSee and get API key")
+    signup_parser = subparsers.add_parser(
+        "signup",
+        help="Signup for BotSee (credit card by default)",
+    )
     signup_parser.add_argument("--email", help="Contact email (optional)")
     signup_parser.add_argument("--name", help="Contact name (optional)")
     signup_parser.add_argument("--company", help="Company name (optional)")
     signup_parser.add_argument("--api-key", help="API key if you already have one (skips signup flow)")
     signup_parser.add_argument("--webhook-url", help="Webhook URL for signup completion notification")
     signup_parser.add_argument("--no-email", action="store_true", help="Agent-based signup without email (for crypto payments)")
+    signup_parser.add_argument(
+        "--payment-method",
+        choices=("stripe", "usdc"),
+        help="Signup payment method (default: stripe)",
+    )
+    signup_parser.add_argument(
+        "--crypto",
+        action="store_true",
+        help="Shortcut for --payment-method usdc with agent-based signup",
+    )
+
+    signup_status_parser = subparsers.add_parser("signup-status", help="Check signup token status")
+    signup_status_parser.add_argument("--token", help="Signup token (defaults to pending signup token)")
+
+    signup_pay_usdc_parser = subparsers.add_parser(
+        "signup-pay-usdc",
+        help="Initiate USDC payment for a signup token on Base mainnet",
+    )
+    signup_pay_usdc_parser.add_argument("--token", help="Signup token (defaults to pending signup token)")
+    signup_pay_usdc_parser.add_argument(
+        "--amount-cents",
+        type=int,
+        required=True,
+        help=f"USD amount in cents ({USDC_MIN_CENTS}-{USDC_MAX_CENTS})",
+    )
+    signup_pay_usdc_parser.add_argument(
+        "--from-address",
+        required=True,
+        help="EVM wallet address sending USDC (0x...)",
+    )
+    signup_pay_usdc_parser.add_argument(
+        "--payment",
+        help="x402 payment proof header value when retrying after HTTP 402",
+    )
+    signup_pay_usdc_parser.add_argument(
+        "--tx-hash",
+        help="Transaction hash proof (builds x402 payment header automatically)",
+    )
+    signup_pay_usdc_parser.add_argument(
+        "--asset",
+        default=USDC_ASSET_DEFAULT,
+        help=f"Asset used in tx-hash payload (default: {USDC_ASSET_DEFAULT})",
+    )
 
     create_site_parser = subparsers.add_parser("create-site", help="Create site and generate content")
     create_site_parser.add_argument("domain", help="Website URL to analyze")
@@ -1341,11 +1832,51 @@ def main():
 
     analyze_parser = subparsers.add_parser("analyze", help="Run competitive analysis")
     analyze_parser.add_argument("site_uuid", nargs="?", help="Site UUID (optional, defaults to active site)")
+    analyze_parser.add_argument("--scope", help="Analysis scope (e.g. site)")
+    analyze_parser.add_argument("--models", help="Comma-separated models (e.g. openai,claude,perplexity)")
 
-    subparsers.add_parser("content", help="Generate blog post from analysis")
+    content_parser = subparsers.add_parser("content", help="Generate blog post from analysis")
+    content_parser.add_argument("--question-uuid", help="Target question UUID for content generation")
+    content_parser.add_argument("--provider", help="Preferred provider (e.g. gemini)")
+
+    topup_usdc_parser = subparsers.add_parser(
+        "topup-usdc",
+        help="Add credits using USDC on Base mainnet",
+    )
+    topup_usdc_parser.add_argument(
+        "--amount-cents",
+        type=int,
+        required=True,
+        help=f"USD amount in cents ({USDC_MIN_CENTS}-{USDC_MAX_CENTS})",
+    )
+    topup_usdc_parser.add_argument(
+        "--from-address",
+        required=True,
+        help="EVM wallet address sending USDC (0x...)",
+    )
+    topup_usdc_parser.add_argument(
+        "--payment",
+        help="x402 payment proof header value when retrying after HTTP 402",
+    )
+    topup_usdc_parser.add_argument(
+        "--tx-hash",
+        help="Transaction hash proof (builds x402 payment header automatically)",
+    )
+    topup_usdc_parser.add_argument(
+        "--asset",
+        default=USDC_ASSET_DEFAULT,
+        help=f"Asset used in tx-hash payload (default: {USDC_ASSET_DEFAULT})",
+    )
 
     # Sites CRUD
-    subparsers.add_parser("list-sites", help="List all sites")
+    list_sites_parser = subparsers.add_parser("list-sites", help="List all sites")
+    list_sites_parser.add_argument("--limit", type=int, help="Max sites to return")
+    list_sites_parser.add_argument("--cursor", help="Pagination cursor")
+    list_sites_parser.add_argument(
+        "--include-archived",
+        action="store_true",
+        help="Include archived sites",
+    )
     get_site_parser = subparsers.add_parser("get-site", help="Get site by UUID")
     get_site_parser.add_argument("uuid", help="Site UUID")
 
@@ -1420,7 +1951,8 @@ def main():
 
     update_question_parser = subparsers.add_parser("update-question", help="Update question")
     update_question_parser.add_argument("uuid", help="Question UUID")
-    update_question_parser.add_argument("--text", required=True, help="New question text")
+    update_question_parser.add_argument("--text", help="New question text")
+    update_question_parser.add_argument("--priority", help="Question priority")
 
     delete_question_parser = subparsers.add_parser("delete-question", help="Delete question (permanent)")
     delete_question_parser.add_argument("uuid", help="Question UUID")
@@ -1445,6 +1977,8 @@ def main():
     list_analyses_parser.add_argument("--cursor", help="Pagination cursor")
     list_analyses_parser.add_argument("--persona-uuid", help="Filter by persona")
     list_analyses_parser.add_argument("--model", help="Filter by model")
+    list_analyses_parser.add_argument("--from", dest="from_time", help="Filter start timestamp")
+    list_analyses_parser.add_argument("--to", dest="to_time", help="Filter end timestamp")
 
     # Question results
     question_results_parser = subparsers.add_parser("get-question-results", help="Get analysis results for a specific question")
@@ -1458,10 +1992,13 @@ def main():
         "account": cmd_account,
         "update": cmd_update,
         "signup": cmd_signup,
+        "signup-status": cmd_signup_status,
+        "signup-pay-usdc": cmd_signup_pay_usdc,
         "create-site": cmd_create_site,
         "config-show": cmd_config_show,
         "analyze": cmd_analyze,
         "content": cmd_content,
+        "topup-usdc": cmd_topup_usdc,
         "list-sites": cmd_list_sites,
         "get-site": cmd_get_site,
         "archive-site": cmd_archive_site,
