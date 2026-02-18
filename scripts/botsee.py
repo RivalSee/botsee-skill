@@ -2,7 +2,6 @@
 """BotSee CLI — AI-powered competitive intelligence via BotSee API."""
 
 import argparse
-import base64
 import json
 import os
 import re
@@ -18,7 +17,7 @@ import urllib.request
 from pathlib import Path
 
 # Version
-__version__ = "2.0.0"
+__version__ = "0.2.1"
 
 # API Configuration
 BASE_URL = "https://botsee.io"
@@ -52,10 +51,9 @@ TEXT_TRUNCATE_LEN = 80
 # USDC / x402
 USDC_MIN_CENTS = 250
 USDC_MAX_CENTS = 100000
-USDC_NETWORK_MAINNET = "base-mainnet"
-USDC_ASSET_DEFAULT = "USDC"
 PAYMENT_HEADER_REQUIRED = "payment-required"
 PAYMENT_HEADER_REQUEST = "payment"
+PAYMENT_HEADER_SIGNATURE = "payment-signature"
 PAYMENT_HEADER_RESPONSE = "payment-response"
 
 
@@ -377,46 +375,28 @@ def resolve_signup_token(explicit_token=None):
 
 
 def show_usdc_payment_instructions(resp):
-    """Display payment instructions returned by signup/topup USDC endpoints."""
-    print("✅ USDC payment initialized")
-    print(f"   Network: {resp.get('network', '?')} (Chain ID: {resp.get('chain_id', '?')})")
-    print(f"   Amount: {resp.get('amount_usdc', '?')} USDC")
-    print(f"   Send to: {resp.get('pay_to_address', '?')}")
-    print(f"   USDC contract: {resp.get('usdc_contract', '?')}")
+    """Display x402 payment requirements returned by USDC endpoints."""
+    # New x402 shape: accepts or payment_requirements array
+    requirements = resp.get("accepts") or resp.get("payment_requirements") or []
+    req = requirements[0] if requirements else {}
 
-    facilitator_url = resp.get("facilitator_url")
-    if facilitator_url:
-        print(f"   x402 facilitator: {facilitator_url}")
+    amount_raw = req.get("amount", "?")
+    # amount is in USDC micro-units (6 decimals); convert to readable
+    try:
+        amount_usdc = f"{int(amount_raw) / 1_000_000:.2f}"
+    except (ValueError, TypeError):
+        amount_usdc = amount_raw
 
-    status_url = resp.get("status_url")
-    if status_url:
-        print(f"   Status endpoint: {status_url}")
-
-    payment_id = resp.get("payment_id") or resp.get("topup_id")
-    if payment_id:
-        print(f"   Payment ID: {payment_id}")
+    print("Payment required (HTTP 402).")
+    print(f"   Network: {req.get('network', '?')}")
+    print(f"   Amount:  {amount_usdc} USDC")
+    print(f"   Send to: {req.get('payTo', '?')}")
+    print(f"   Asset:   {req.get('asset', '?')}")
 
     expires_at = resp.get("expires_at")
     if expires_at:
-        print(f"   Expires at: {expires_at}")
+        print(f"   Expires: {expires_at}")
 
-
-def build_txhash_payment_header(tx_hash, payer, amount_cents, asset=USDC_ASSET_DEFAULT):
-    """Build base64-encoded x402 transaction-based payment payload."""
-    payload = {
-        "txHash": tx_hash,
-        "network": USDC_NETWORK_MAINNET,
-        "asset": asset,
-        "amount": f"{amount_cents / 100:.2f}",
-        "payer": payer,
-    }
-    encoded = base64.b64encode(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
-    return encoded.decode("utf-8")
-
-
-def validate_tx_hash(tx_hash):
-    """Validate transaction hash format."""
-    return bool(re.match(r"^0x[a-fA-F0-9]{64}$", tx_hash))
 
 
 # --- Generic CRUD helpers (reduces duplication) ---
@@ -507,7 +487,7 @@ def cmd_status(args):
     print("Commands:")
     print("  /botsee account               - View account details")
     print("  /botsee signup                - Signup with credit card")
-    print("  /botsee signup --crypto       - Signup with USDC on Base")
+    print("  /botsee signup-usdc           - Signup with USDC on Base")
     print("  /botsee topup-usdc            - Add credits with USDC")
     print("  /botsee create-site <domain>  - Create site")
     print("  /botsee analyze               - Analyze website")
@@ -651,8 +631,7 @@ def signup_resume():
 
 
 def signup_new(args):
-    """Create a new signup token and save for later completion."""
-    # Build signup data with optional contact fields
+    """Create a new credit-card signup token and save for later completion."""
     signup_data = {}
     if args.email:
         signup_data["contact_email"] = args.email
@@ -663,67 +642,35 @@ def signup_new(args):
     if hasattr(args, 'webhook_url') and args.webhook_url:
         signup_data["webhook_url"] = args.webhook_url
 
-    payment_method = getattr(args, "payment_method", None)
-    if getattr(args, "crypto", False):
-        payment_method = "usdc"
-    if payment_method:
-        signup_data["payment_method"] = payment_method
-
-    # Signal agent-based/crypto signup (no email dialogs)
-    if hasattr(args, 'no_email') and (args.no_email or payment_method == "usdc"):
-        signup_data["agent_based"] = True
-        signup_data["skip_email_collection"] = True
-
-    # Call signup API (contact fields are optional)
     resp, status, update_available = api_call("POST", "/signup", data=signup_data)
     if status not in (HTTP_OK, HTTP_CREATED):
         print(f"Signup failed (HTTP {status}): {resp}", file=sys.stderr)
         sys.exit(1)
 
-    # Show update notification if available
     if update_available:
         show_update_notification(update_available)
 
-    # Parse response - API returns setup_token, not token
     setup_token = resp.get("setup_token")
     setup_url = resp.get("setup_url")
     status_url = resp.get("status_url")
-    returned_payment_method = resp.get("payment_method") or payment_method or "stripe"
 
     if not setup_token or not setup_url:
         print(f"Unexpected signup response: {resp}", file=sys.stderr)
         sys.exit(1)
 
-    # Show URL prominently and save for later (non-interactive default)
-    print(f"")
-    if returned_payment_method == "usdc":
-        print("USDC signup token created.")
-        print(f"Setup URL: {setup_url}")
-        print("")
-        print("Next steps:")
-        print(
-            f"  /botsee signup-pay-usdc --token {setup_token} "
-            f"--amount-cents {USDC_MIN_CENTS} --from-address 0x..."
-        )
-        print(f"  /botsee signup-status --token {setup_token}")
-        print("")
-    else:
-        print("Credit card signup token created.")
-        print(f"Complete signup: {setup_url}")
-        print(f"")
+    print("")
+    print("Credit card signup token created.")
+    print(f"Complete signup: {setup_url}")
+    print("")
 
-    # Save pending signup (non-interactive mode - agent-friendly)
     save_pending_signup({
         "setup_token": setup_token,
         "setup_url": setup_url,
         "status_url": status_url,
-        "payment_method": returned_payment_method,
+        "payment_method": "credit_card",
     })
 
-    if returned_payment_method == "usdc":
-        print("For USDC on Base, initiate payment using /botsee signup-pay-usdc.")
-    else:
-        print("After completing signup, paste the text provided on the website here.")
+    print("After completing signup, paste the text provided on the website here.")
 
 
 def signup_save_key(api_key):
@@ -768,8 +715,52 @@ def cmd_signup(args):
     return signup_new(args)
 
 
+def cmd_signup_usdc(args):
+    """Create a USDC signup token via the dedicated /signup/usdc endpoint."""
+    signup_data = {}
+    if args.email:
+        signup_data["contact_email"] = args.email
+    if args.name:
+        signup_data["contact_name"] = args.name
+    if args.company:
+        signup_data["company_name"] = args.company
+    if args.no_email:
+        signup_data["no_email"] = True
+
+    resp, status, update_available = api_call("POST", "/signup/usdc", data=signup_data)
+    if status not in (HTTP_OK, HTTP_CREATED):
+        print(f"USDC signup failed (HTTP {status}): {resp}", file=sys.stderr)
+        sys.exit(1)
+
+    if update_available:
+        show_update_notification(update_available)
+
+    setup_token = resp.get("setup_token")
+    setup_url = resp.get("setup_url")
+    status_url = resp.get("status_url")
+
+    if not setup_token:
+        print(f"Unexpected signup response: {resp}", file=sys.stderr)
+        sys.exit(1)
+
+    print("USDC signup token created.")
+    if setup_url:
+        print(f"Setup URL: {setup_url}")
+    print("")
+    print("Next steps:")
+    print(f"  /botsee signup-pay-usdc --amount-cents {USDC_MIN_CENTS} --token {setup_token}")
+    print(f"  /botsee signup-status --token {setup_token}")
+
+    save_pending_signup({
+        "setup_token": setup_token,
+        "setup_url": setup_url,
+        "status_url": status_url,
+        "payment_method": "usdc",
+    })
+
+
 def cmd_signup_pay_usdc(args):
-    """Initiate USDC payment for signup token."""
+    """Initiate USDC x402 payment for signup token."""
     token = resolve_signup_token(args.token)
 
     if not (USDC_MIN_CENTS <= args.amount_cents <= USDC_MAX_CENTS):
@@ -779,49 +770,28 @@ def cmd_signup_pay_usdc(args):
         )
         sys.exit(1)
 
-    if not args.from_address.startswith("0x"):
-        print("from-address must be an EVM address starting with 0x", file=sys.stderr)
-        sys.exit(1)
-
-    if args.tx_hash and args.payment:
-        print("Use either --tx-hash or --payment, not both.", file=sys.stderr)
-        sys.exit(1)
-
-    payment_value = args.payment
-    if args.tx_hash:
-        if not validate_tx_hash(args.tx_hash):
-            print("tx-hash must be a 0x-prefixed 32-byte hex hash.", file=sys.stderr)
-            sys.exit(1)
-        payment_value = build_txhash_payment_header(
-            tx_hash=args.tx_hash,
-            payer=args.from_address,
-            amount_cents=args.amount_cents,
-            asset=args.asset,
-        )
-        print("Using transaction-based x402 payment payload (txHash).")
-
-    payment_headers = {PAYMENT_HEADER_REQUEST: payment_value} if payment_value else None
-    payload = {
-        "amount_cents": args.amount_cents,
-        "from_address": args.from_address,
-        "network": USDC_NETWORK_MAINNET,
-    }
+    payment_headers = {PAYMENT_HEADER_SIGNATURE: args.payment} if args.payment else None
     resp, status, _ = api_call(
         "POST",
         f"/signup/{token}/pay-usdc",
-        data=payload,
+        data={"amount_cents": args.amount_cents},
         extra_headers=payment_headers,
     )
+
+    if status == HTTP_PAYMENT_REQUIRED:
+        show_usdc_payment_instructions(resp)
+        print("")
+        print(f"Use a wallet to pay, then retry with --payment <proof>:")
+        print(f"  /botsee signup-pay-usdc --token {token} --amount-cents {args.amount_cents} --payment <proof>")
+        return
+
     if status not in (HTTP_OK, HTTP_CREATED, HTTP_ACCEPTED):
         print(f"USDC signup payment failed (HTTP {status}): {resp}", file=sys.stderr)
-        if status == HTTP_PAYMENT_REQUIRED:
-            show_payment_required_help(resp)
         sys.exit(1)
 
-    show_usdc_payment_instructions(resp)
     show_payment_headers(resp)
-    print("")
-    print(f"Then check status: /botsee signup-status --token {token}")
+    print("✅ USDC payment submitted.")
+    print(f"Check status: /botsee signup-status --token {token}")
 
     pending = load_pending_signup() or {}
     pending.update({
@@ -882,7 +852,7 @@ def cmd_signup_status(args):
 
 
 def cmd_topup_usdc(args):
-    """Initiate USDC top-up for organization credits."""
+    """Add credits via USDC x402 challenge flow."""
     config = require_user_config()
 
     if not (USDC_MIN_CENTS <= args.amount_cents <= USDC_MAX_CENTS):
@@ -892,47 +862,28 @@ def cmd_topup_usdc(args):
         )
         sys.exit(1)
 
-    if not args.from_address.startswith("0x"):
-        print("from-address must be an EVM address starting with 0x", file=sys.stderr)
-        sys.exit(1)
-
-    if args.tx_hash and args.payment:
-        print("Use either --tx-hash or --payment, not both.", file=sys.stderr)
-        sys.exit(1)
-
-    payment_value = args.payment
-    if args.tx_hash:
-        if not validate_tx_hash(args.tx_hash):
-            print("tx-hash must be a 0x-prefixed 32-byte hex hash.", file=sys.stderr)
-            sys.exit(1)
-        payment_value = build_txhash_payment_header(
-            tx_hash=args.tx_hash,
-            payer=args.from_address,
-            amount_cents=args.amount_cents,
-            asset=args.asset,
-        )
-        print("Using transaction-based x402 payment payload (txHash).")
-
-    payment_headers = {PAYMENT_HEADER_REQUEST: payment_value} if payment_value else None
+    payment_headers = {PAYMENT_HEADER_SIGNATURE: args.payment} if args.payment else None
     resp, status, _ = api_call(
         "POST",
         "/billing/topups/usdc",
-        data={
-            "amount_cents": args.amount_cents,
-            "from_address": args.from_address,
-            "network": USDC_NETWORK_MAINNET,
-        },
+        data={"amount_cents": args.amount_cents},
         api_key=config["api_key"],
         extra_headers=payment_headers,
     )
+
+    if status == HTTP_PAYMENT_REQUIRED:
+        show_usdc_payment_instructions(resp)
+        print("")
+        print(f"Use a wallet to pay, then retry with --payment <proof>:")
+        print(f"  /botsee topup-usdc --amount-cents {args.amount_cents} --payment <proof>")
+        return
+
     if status not in (HTTP_OK, HTTP_CREATED, HTTP_ACCEPTED):
         print(f"USDC top-up failed (HTTP {status}): {resp}", file=sys.stderr)
-        if status == HTTP_PAYMENT_REQUIRED:
-            show_payment_required_help(resp)
         sys.exit(1)
 
-    show_usdc_payment_instructions(resp)
     show_payment_headers(resp)
+    print("✅ USDC top-up submitted.")
     credits = resp.get("credits")
     if credits is not None:
         print(f"Credits to add on confirmation: {credits}")
@@ -1770,23 +1721,25 @@ def main():
 
     signup_parser = subparsers.add_parser(
         "signup",
-        help="Signup for BotSee (credit card by default)",
+        help="Signup for BotSee with credit card",
     )
     signup_parser.add_argument("--email", help="Contact email (optional)")
     signup_parser.add_argument("--name", help="Contact name (optional)")
     signup_parser.add_argument("--company", help="Company name (optional)")
     signup_parser.add_argument("--api-key", help="API key if you already have one (skips signup flow)")
     signup_parser.add_argument("--webhook-url", help="Webhook URL for signup completion notification")
-    signup_parser.add_argument("--no-email", action="store_true", help="Agent-based signup without email (for crypto payments)")
-    signup_parser.add_argument(
-        "--payment-method",
-        choices=("stripe", "usdc"),
-        help="Signup payment method (default: stripe)",
+
+    signup_usdc_parser = subparsers.add_parser(
+        "signup-usdc",
+        help="Signup for BotSee with USDC on Base",
     )
-    signup_parser.add_argument(
-        "--crypto",
+    signup_usdc_parser.add_argument("--email", help="Contact email (optional)")
+    signup_usdc_parser.add_argument("--name", help="Contact name (optional)")
+    signup_usdc_parser.add_argument("--company", help="Company name (optional)")
+    signup_usdc_parser.add_argument(
+        "--no-email",
         action="store_true",
-        help="Shortcut for --payment-method usdc with agent-based signup",
+        help="Skip email verification (for autonomous agent flows)",
     )
 
     signup_status_parser = subparsers.add_parser("signup-status", help="Check signup token status")
@@ -1794,7 +1747,7 @@ def main():
 
     signup_pay_usdc_parser = subparsers.add_parser(
         "signup-pay-usdc",
-        help="Initiate USDC payment for a signup token on Base mainnet",
+        help="Pay for USDC signup via x402 challenge",
     )
     signup_pay_usdc_parser.add_argument("--token", help="Signup token (defaults to pending signup token)")
     signup_pay_usdc_parser.add_argument(
@@ -1804,22 +1757,8 @@ def main():
         help=f"USD amount in cents ({USDC_MIN_CENTS}-{USDC_MAX_CENTS})",
     )
     signup_pay_usdc_parser.add_argument(
-        "--from-address",
-        required=True,
-        help="EVM wallet address sending USDC (0x...)",
-    )
-    signup_pay_usdc_parser.add_argument(
         "--payment",
-        help="x402 payment proof header value when retrying after HTTP 402",
-    )
-    signup_pay_usdc_parser.add_argument(
-        "--tx-hash",
-        help="Transaction hash proof (builds x402 payment header automatically)",
-    )
-    signup_pay_usdc_parser.add_argument(
-        "--asset",
-        default=USDC_ASSET_DEFAULT,
-        help=f"Asset used in tx-hash payload (default: {USDC_ASSET_DEFAULT})",
+        help="x402 payment-signature proof (omit to get 402 challenge)",
     )
 
     create_site_parser = subparsers.add_parser("create-site", help="Create site and generate content")
@@ -1841,7 +1780,7 @@ def main():
 
     topup_usdc_parser = subparsers.add_parser(
         "topup-usdc",
-        help="Add credits using USDC on Base mainnet",
+        help="Add credits via USDC x402 challenge",
     )
     topup_usdc_parser.add_argument(
         "--amount-cents",
@@ -1850,22 +1789,8 @@ def main():
         help=f"USD amount in cents ({USDC_MIN_CENTS}-{USDC_MAX_CENTS})",
     )
     topup_usdc_parser.add_argument(
-        "--from-address",
-        required=True,
-        help="EVM wallet address sending USDC (0x...)",
-    )
-    topup_usdc_parser.add_argument(
         "--payment",
-        help="x402 payment proof header value when retrying after HTTP 402",
-    )
-    topup_usdc_parser.add_argument(
-        "--tx-hash",
-        help="Transaction hash proof (builds x402 payment header automatically)",
-    )
-    topup_usdc_parser.add_argument(
-        "--asset",
-        default=USDC_ASSET_DEFAULT,
-        help=f"Asset used in tx-hash payload (default: {USDC_ASSET_DEFAULT})",
+        help="x402 payment-signature proof (omit to get 402 challenge)",
     )
 
     # Sites CRUD
@@ -1992,6 +1917,7 @@ def main():
         "account": cmd_account,
         "update": cmd_update,
         "signup": cmd_signup,
+        "signup-usdc": cmd_signup_usdc,
         "signup-status": cmd_signup_status,
         "signup-pay-usdc": cmd_signup_pay_usdc,
         "create-site": cmd_create_site,
