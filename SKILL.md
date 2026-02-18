@@ -1,7 +1,7 @@
 ---
 name: botsee
 description: AI-powered competitive intelligence via BotSee API
-version: 2.0.0
+version: 0.2.1
 ---
 
 # BotSee Skill
@@ -12,10 +12,11 @@ Commands:
 
 **Workflow:**
 - /botsee                                  - Quick status and help
-- /botsee signup [--email EMAIL] [--name NAME] [--company COMPANY] [--api-key KEY] [--payment-method stripe|usdc] [--crypto] - Signup with credit card by default, or prepare USDC signup
-- /botsee signup-pay-usdc --amount-cents N --from-address 0x... [--token TOKEN] [--tx-hash 0x...] - Start USDC payment for signup on Base mainnet
+- /botsee signup [--email EMAIL] [--name NAME] [--company COMPANY] [--api-key KEY] - Signup with credit card
+- /botsee signup-usdc [--email EMAIL] [--name NAME] [--company COMPANY] [--no-email] - Signup with USDC on Base
+- /botsee signup-pay-usdc --amount-cents N [--token TOKEN] [--payment PROOF] - Pay for USDC signup via x402
 - /botsee signup-status [--token TOKEN]    - Check signup completion and save API key
-- /botsee topup-usdc --amount-cents N --from-address 0x... [--tx-hash 0x...] - Add credits with USDC on Base mainnet
+- /botsee topup-usdc --amount-cents N [--payment PROOF] - Add credits with USDC on Base via x402
 - /botsee create-site <domain> [--types N]   - Save custom config
 - /botsee config-show                      - Display saved config
 - /botsee analyze                          - Run competitive analysis
@@ -67,9 +68,9 @@ When user invokes a BotSee command, run the corresponding Python script. All com
 python3 ~/.claude/skills/botsee/scripts/botsee.py status
 ```
 
-### /botsee signup [--email EMAIL] [--name NAME] [--company COMPANY] [--api-key KEY] [--payment-method stripe|usdc] [--crypto]
+### /botsee signup [--email EMAIL] [--name NAME] [--company COMPANY] [--api-key KEY]
 
-**New user signup flow:**
+**New user signup flow (credit card):**
 
 **Step 1: Get signup URL**
 ```bash
@@ -77,7 +78,6 @@ python3 ~/.claude/skills/botsee/scripts/botsee.py signup
 ```
 
 This displays a signup URL. Tell the user: "Visit this URL to complete signup and get your API key. Then paste your API key here."
-This is the **credit card signup flow**.
 
 **Step 2: User pastes API key in conversation**
 
@@ -87,13 +87,6 @@ When the user provides their API key (e.g., "Here's my API key: bts_live_abc123"
 python3 ~/.claude/skills/botsee/scripts/botsee.py signup --api-key <extracted-key>
 ```
 
-**Step 3: User runs create-site**
-
-After saving the API key, the user can run:
-```bash
-python3 ~/.claude/skills/botsee/scripts/botsee.py create-site <domain>
-```
-
 **IMPORTANT: Agent behavior when user pastes API key**
 
 When you detect a BotSee API key in the conversation (format: `bts_live_*` or `bts_test_*`):
@@ -101,47 +94,72 @@ When you detect a BotSee API key in the conversation (format: `bts_live_*` or `b
 2. Confirm to the user: "✅ API key saved! You can now run /botsee create-site <domain>"
 3. Do NOT ask the user to manually run the signup command with the key
 
-**Example conversation:**
+### /botsee signup-usdc [--email EMAIL] [--name NAME] [--company COMPANY] [--no-email]
+
+**USDC signup flow (x402 on Base):**
+
+**Step 1 — Ask the user before calling the API**
+
+When `signup-usdc` is invoked without already knowing the user's preference, ask:
+
+> "Do you want to associate an email with this account?
+> - **Yes (email)** — You'll get a setup link to verify your email and access the dashboard later
+> - **No (API only)** — Skip email entirely and go straight to payment"
+
+**Step 2a — Email path**
+
+Call:
+```bash
+python3 ~/.claude/skills/botsee/scripts/botsee.py signup-usdc
 ```
-User: /botsee signup
-Assistant: [runs signup, gets URL] "Visit https://botsee.io/setup/TOKEN to complete signup. Paste your API key here when you get it."
+(no `--no-email` flag)
 
-User: "Here's my API key: bts_live_abc123def456"
-Assistant: [automatically runs: signup --api-key bts_live_abc123def456]
-         "✅ API key saved! Run /botsee create-site <your-domain> to set up your site."
+The response includes a `setup_url`. Tell the user:
 
-User: /botsee create-site https://example.com
-Assistant: [runs create-site, which uses saved API key]
+> "Visit this URL to enter and verify your email and read the setup instructions:
+> `<setup_url from response>`
+>
+> Once you've done that, come back here and we'll complete the USDC payment."
+
+Do NOT call `signup-pay-usdc` yet. Wait for the user to confirm they've completed the setup URL step.
+
+**Step 2b — No-email path**
+
+Call:
+```bash
+python3 ~/.claude/skills/botsee/scripts/botsee.py signup-usdc --no-email
 ```
 
-Existing user (has API key):
+No setup URL will be returned. Immediately proceed to payment.
+
+**Step 3 — Payment (both paths)**
+
+After the email-path user confirms they visited the setup URL (or immediately for no-email path):
 
 ```bash
-python3 ~/.claude/skills/botsee/scripts/botsee.py signup --api-key <key>
-```
-
-**What happens:**
-1. Validates API key
-2. Saves API key to `~/.botsee/config.json`
-
-**Crypto flow (USDC on Base):**
-```bash
-python3 ~/.claude/skills/botsee/scripts/botsee.py signup --crypto
-python3 ~/.claude/skills/botsee/scripts/botsee.py signup-pay-usdc --amount-cents 250 --from-address 0x...
+python3 ~/.claude/skills/botsee/scripts/botsee.py signup-pay-usdc --amount-cents 250
 python3 ~/.claude/skills/botsee/scripts/botsee.py signup-status
 ```
 
-USDC network:
-- `base-mainnet` (Chain ID 8453)
+**x402 flow details:**
+1. `signup-usdc` creates a USDC signup token via `POST /api/v1/signup/usdc`
+2. `signup-pay-usdc --amount-cents N` calls `POST /api/v1/signup/:token/pay-usdc` without a payment header → server returns 402 with payment requirements (network, amount, `payTo` address)
+3. Use a wallet (Pinch, Coinbase CDP Agentic Wallet) to send USDC to the returned address
+4. Retry with the payment proof: `signup-pay-usdc --amount-cents N --payment <proof>`
+5. `signup-status` polls until complete and saves the API key
 
-### /botsee signup-pay-usdc --amount-cents N --from-address 0x... [--token TOKEN] [--tx-hash 0x...]
+### /botsee signup-pay-usdc --amount-cents N [--token TOKEN] [--payment PROOF]
 
 ```bash
-python3 ~/.claude/skills/botsee/scripts/botsee.py signup-pay-usdc --amount-cents 5000 --from-address 0x1234...
+# Step 1: Get 402 challenge (no --payment → returns payment requirements)
+python3 ~/.claude/skills/botsee/scripts/botsee.py signup-pay-usdc --amount-cents 250
+
+# Step 2: Retry with proof after wallet pays
+python3 ~/.claude/skills/botsee/scripts/botsee.py signup-pay-usdc --amount-cents 250 --payment <proof>
 ```
 
-Use `--payment <proof>` to send x402 `payment` header when retrying after HTTP 402.
-Use `--tx-hash <0x...>` to auto-build transaction-based x402 payload (`txHash`, `network`, `asset`, `amount`, `payer`).
+Omit `--payment` to get a 402 challenge with network, amount, and `payTo` address.
+Include `--payment <base64-proof>` on the final retry after your wallet has made the payment.
 
 ### /botsee signup-status [--token TOKEN]
 
@@ -151,14 +169,18 @@ python3 ~/.claude/skills/botsee/scripts/botsee.py signup-status
 
 Saves API key to `~/.botsee/config.json` automatically once signup is completed.
 
-### /botsee topup-usdc --amount-cents N --from-address 0x... [--tx-hash 0x...]
+### /botsee topup-usdc --amount-cents N [--payment PROOF]
 
 ```bash
-python3 ~/.claude/skills/botsee/scripts/botsee.py topup-usdc --amount-cents 5000 --from-address 0x1234...
+# Step 1: Get 402 challenge (no --payment → returns payment requirements)
+python3 ~/.claude/skills/botsee/scripts/botsee.py topup-usdc --amount-cents 5000
+
+# Step 2: Retry with proof after wallet pays
+python3 ~/.claude/skills/botsee/scripts/botsee.py topup-usdc --amount-cents 5000 --payment <proof>
 ```
 
-Use `--payment <proof>` to send x402 `payment` header when retrying after HTTP 402.
-Use `--tx-hash <0x...>` to auto-build transaction-based x402 payload (`txHash`, `network`, `asset`, `amount`, `payer`).
+Omit `--payment` to get a 402 challenge with network, amount, and `payTo` address.
+Include `--payment <base64-proof>` on the final retry after your wallet has made the payment.
 
 ### /botsee create-site <domain> [--types T] [--personas P] [--questions Q]
 
