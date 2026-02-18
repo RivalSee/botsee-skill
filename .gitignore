@@ -2,6 +2,11 @@
 test_config.json
 .botsee/
 
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
 # macOS
 .DS_Store
 
@@ -11,3 +16,9 @@ test_config.json
 *~
 .vscode/
 .idea/
+
+# Documentation and planning
+docs/
+
+# Playwright MCP
+.playwright-mcp/

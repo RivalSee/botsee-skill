@@ -1,7 +1,7 @@
 ---
 name: botsee
 description: AI-powered competitive intelligence via BotSee API
-version: 1.0.0
+version: 2.0.0
 ---
 
 # BotSee Skill
@@ -9,419 +9,503 @@ version: 1.0.0
 Get AI-powered competitive intelligence on any website.
 
 Commands:
-- /botsee              - Quick status and help
-- /botsee setup        - Configure API key and site interactively
-- /botsee analyze      - Full competitive analysis
-- /botsee content      - Generate blog post from analysis
 
-<!-- Implementation will be added in next tasks -->
+**Workflow:**
+- /botsee                                  - Quick status and help
+- /botsee signup [--email EMAIL] [--name NAME] [--company COMPANY] [--api-key KEY] [--payment-method stripe|usdc] [--crypto] - Signup with credit card by default, or prepare USDC signup
+- /botsee signup-pay-usdc --amount-cents N --from-address 0x... [--token TOKEN] [--tx-hash 0x...] - Start USDC payment for signup on Base mainnet
+- /botsee signup-status [--token TOKEN]    - Check signup completion and save API key
+- /botsee topup-usdc --amount-cents N --from-address 0x... [--tx-hash 0x...] - Add credits with USDC on Base mainnet
+- /botsee create-site <domain> [--types N]   - Save custom config
+- /botsee config-show                      - Display saved config
+- /botsee analyze                          - Run competitive analysis
+- /botsee content                          - Generate blog post from analysis
+
+**Sites:**
+- /botsee list-sites             - List all sites
+- /botsee get-site [uuid]        - View site details
+- /botsee create-site <domain>   - Create a new site
+- /botsee archive-site [uuid]    - Archive a site
+
+**Customer Types:**
+- /botsee list-types             - List customer types
+- /botsee get-type <uuid>        - View type details
+- /botsee create-type <name> [desc] - Create customer type
+- /botsee generate-types [count] - Generate customer types
+- /botsee update-type <uuid> [name] [desc] - Update customer type
+- /botsee archive-type <uuid>    - Archive customer type
+
+**Personas:**
+- /botsee list-personas [type]   - List personas (all or by type)
+- /botsee get-persona <uuid>     - View persona details
+- /botsee create-persona <type> <name> [desc] - Create persona
+- /botsee generate-personas <type> [count] - Generate personas for type
+- /botsee update-persona <uuid> [name] [desc] - Update persona
+- /botsee archive-persona <uuid> - Archive persona
+
+**Questions:**
+- /botsee list-questions [persona] - List questions (all or by persona)
+- /botsee get-question <uuid>    - View question details
+- /botsee create-question <persona> <text> - Create question
+- /botsee generate-questions <persona> [count] - Generate questions for persona
+- /botsee update-question <uuid> <text> - Update question text
+- /botsee delete-question <uuid> - Delete question
+
+**Results:**
+- /botsee results-competitors <uuid>    - View competitor results
+- /botsee results-keywords <uuid>       - View keyword results
+- /botsee results-sources <uuid>        - View source results
+- /botsee results-responses <uuid>      - View all AI responses
 
 ## Implementation
 
+When user invokes a BotSee command, run the corresponding Python script. All commands use a single bundled script that handles API calls internally.
+
+### /botsee (status)
+
 ```bash
-#!/bin/bash
-
-# Parse command
-command="${1:-}"
-
-case "$command" in
-  "")
-    # /botsee - Quick status & help
-    if [ ! -f ~/.botsee/config.json ]; then
-      echo "🤖 BotSee - AI Competitive Intelligence"
-      echo ""
-      echo "Get started: /botsee setup"
-      echo "Learn more: https://botsee.io/docs"
-      exit 0
-    fi
-
-    # Config exists - show status
-    api_key=$(jq -r '.api_key' ~/.botsee/config.json 2>/dev/null)
-    key_prefix="${api_key:0:15}"
-
-    # Direct API call with inline error handling
-    response=$(curl -s -m 30 -w "\n%{http_code}" \
-      -H "Authorization: Bearer $api_key" \
-      "https://botsee.io/v1/usage")
-
-    http_code=$(echo "$response" | tail -n1)
-    body=$(echo "$response" | head -n-1)
-
-    if [ "$http_code" != "200" ]; then
-      echo "❌ API error ($http_code). Run: /botsee setup"
-      exit 1
-    fi
-
-    balance=$(echo "$body" | jq -r '.balance')
-    sites=$(echo "$body" | jq -r '.sites_count // 0')
-
-    echo "🤖 BotSee"
-    echo "━━━━━━━━━━━━━━━"
-    echo "💰 Credits: $balance"
-    echo "🌐 Sites: $sites"
-    echo "🔑 Key: ${key_prefix}..."
-    echo ""
-    echo "Commands:"
-    echo "  /botsee analyze  - Analyze website"
-    echo "  /botsee content  - Generate blog post"
-    echo "  /botsee setup    - Reconfigure"
-    ;;
-
+python3 ~/.claude/skills/botsee/scripts/botsee.py status
 ```
 
-  "setup")
-    # /botsee setup - Interactive site configuration
-    echo "🤖 BotSee Setup - Interactive Configuration"
-    echo ""
+### /botsee signup [--email EMAIL] [--name NAME] [--company COMPANY] [--api-key KEY] [--payment-method stripe|usdc] [--crypto]
 
-    # 1. Get API key
-    echo "Get your API key: https://botsee.io/signup"
-    read -sp "Enter API key: " api_key
-    echo ""
+**New user signup flow:**
 
-    if [ -z "$api_key" ]; then
-      echo "❌ API key required"
-      exit 1
-    fi
-
-    # Validate and get balance
-    response=$(curl -s -m 30 -w "\n%{http_code}" \
-      -H "Authorization: Bearer $api_key" "https://botsee.io/v1/usage")
-    http_code=$(echo "$response" | tail -n1)
-    body=$(echo "$response" | head -n-1)
-
-    if [ "$http_code" != "200" ]; then
-      echo "❌ Invalid API key"
-      exit 1
-    fi
-
-    balance=$(echo "$body" | jq -r '.balance')
-    echo "✅ API key valid | Balance: $balance credits"
-    echo ""
-
-    # Inline API helper
-    api_call() {
-      local method="$1" endpoint="$2" data="$3"
-      curl -s -m 30 -X "$method" \
-        -H "Authorization: Bearer $api_key" \
-        -H "Content-Type: application/json" \
-        ${data:+-d "$data"} "https://botsee.io/v1$endpoint"
-    }
-
-    # 2. Get website URL
-    read -p "Website URL to analyze: " url
-    [[ "$url" =~ ^https?:// ]] || url="https://$url"
-
-    echo "⏳ Creating site..."
-    site=$(api_call POST /sites "{\"url\":\"$url\"}")
-    site_uuid=$(echo "$site" | jq -r '.site.uuid')
-    echo "✅ Site created: $site_uuid"
-    echo ""
-
-    # 3. Customer Types - Interactive loop
-    while true; do
-      read -p "How many customer types? (1-3, recommend 2): " ct_count
-      ct_count=${ct_count:-2}
-
-      echo "⏳ Generating $ct_count customer type(s)..."
-      ct=$(api_call POST "/sites/$site_uuid/customer-types/generate" "{\"count\":$ct_count}")
-
-      echo ""
-      echo "📋 Generated Customer Types:"
-      echo "$ct" | jq -r '.customer_types[] | "  - \(.name)"'
-      echo ""
-
-      read -p "Comments or changes? (Enter to continue, 'r' to regenerate): " feedback
-      [ "$feedback" != "r" ] && break
-
-      # Delete and regenerate
-      echo "⏳ Regenerating..."
-      for uuid in $(echo "$ct" | jq -r '.customer_types[].uuid'); do
-        api_call DELETE "/customer-types/$uuid" >/dev/null
-      done
-    done
-
-    ct_uuids=($(echo "$ct" | jq -r '.customer_types[].uuid'))
-    echo "✅ Locked in ${#ct_uuids[@]} customer type(s)"
-    echo ""
-
-    # 4. Personas - Interactive loop per customer type
-    all_persona_uuids=()
-    for ct_uuid in "${ct_uuids[@]}"; do
-      ct_name=$(echo "$ct" | jq -r ".customer_types[] | select(.uuid==\"$ct_uuid\") | .name")
-
-      while true; do
-        read -p "Personas for '$ct_name'? (1-3, recommend 2): " p_count
-        p_count=${p_count:-2}
-
-        echo "⏳ Generating $p_count persona(s)..."
-        personas=$(api_call POST "/customer-types/$ct_uuid/personas/generate" "{\"count\":$p_count}")
-
-        echo ""
-        echo "📋 Generated Personas for '$ct_name':"
-        echo "$personas" | jq -r '.personas[] | "  - \(.name): \(.description[:80])..."'
-        echo ""
-
-        read -p "Comments? (Enter to continue, 'r' to regenerate): " feedback
-        [ "$feedback" != "r" ] && break
-
-        # Delete and regenerate
-        for uuid in $(echo "$personas" | jq -r '.personas[].uuid'); do
-          api_call DELETE "/personas/$uuid" >/dev/null
-        done
-      done
-
-      p_uuids=($(echo "$personas" | jq -r '.personas[].uuid'))
-      all_persona_uuids+=("${p_uuids[@]}")
-    done
-
-    echo "✅ Locked in ${#all_persona_uuids[@]} persona(s)"
-    echo ""
-
-    # 5. Questions - Interactive loop per persona
-    for p_uuid in "${all_persona_uuids[@]}"; do
-      # Get persona name from previous responses
-      p_name=$(echo "$personas" | jq -r ".personas[] | select(.uuid==\"$p_uuid\") | .name" 2>/dev/null || echo "Persona")
-
-      while true; do
-        read -p "Questions for '$p_name'? (3-10, recommend 5): " q_count
-        q_count=${q_count:-5}
-
-        echo "⏳ Generating $q_count question(s)..."
-        questions=$(api_call POST "/personas/$p_uuid/questions/generate" "{\"count\":$q_count}")
-
-        echo ""
-        echo "📋 Generated Questions:"
-        echo "$questions" | jq -r '.questions[] | "  - \(.question)"'
-        echo ""
-
-        read -p "Comments? (Enter to continue, 'r' to regenerate): " feedback
-        [ "$feedback" != "r" ] && break
-
-        # Delete and regenerate
-        for uuid in $(echo "$questions" | jq -r '.questions[].uuid'); do
-          api_call DELETE "/questions/$uuid" >/dev/null
-        done
-      done
-    done
-
-    # 6. Save configuration
-    mkdir -p ~/.botsee && chmod 700 ~/.botsee
-    (umask 077; echo "{\"api_key\":\"$api_key\",\"site_uuid\":\"$site_uuid\"}" > ~/.botsee/config.json)
-
-    echo ""
-    echo "✅ Setup complete!"
-    echo "💰 Balance: $balance credits"
-    echo ""
-    echo "Run: /botsee analyze"
-    ;;
-
+**Step 1: Get signup URL**
+```bash
+python3 ~/.claude/skills/botsee/scripts/botsee.py signup
 ```
 
-  "analyze")
-    # /botsee analyze - Run analysis on pre-configured site
-    echo "🤖 BotSee Analysis"
-    echo ""
+This displays a signup URL. Tell the user: "Visit this URL to complete signup and get your API key. Then paste your API key here."
+This is the **credit card signup flow**.
 
-    # Read config
-    if [ ! -f ~/.botsee/config.json ]; then
-      echo "❌ Not configured. Run: /botsee setup"
-      exit 1
-    fi
+**Step 2: User pastes API key in conversation**
 
-    api_key=$(jq -r '.api_key' ~/.botsee/config.json)
-    site_uuid=$(jq -r '.site_uuid' ~/.botsee/config.json)
+When the user provides their API key (e.g., "Here's my API key: bts_live_abc123"), extract it and save it:
 
-    if [ -z "$site_uuid" ] || [ "$site_uuid" = "null" ]; then
-      echo "❌ No site configured. Run: /botsee setup"
-      exit 1
-    fi
-
-    # Inline API helper
-    api_call() {
-      local method="$1" endpoint="$2" data="$3"
-      local resp=$(curl -s -m 30 -w "\n%{http_code}" \
-        -X "$method" \
-        -H "Authorization: Bearer $api_key" \
-        -H "Content-Type: application/json" \
-        ${data:+-d "$data"} \
-        "https://botsee.io/v1$endpoint")
-
-      local code=$(echo "$resp" | tail -n1)
-      local body=$(echo "$resp" | head -n-1)
-
-      if [ "$code" = "402" ]; then
-        echo "❌ Insufficient credits"
-        echo "$body" | jq -r '.balance // "unknown"' 2>/dev/null
-        echo "Add credits: https://botsee.io/billing"
-        exit 1
-      elif [[ ! "$code" =~ ^(200|201|202)$ ]]; then
-        echo "❌ API error ($code)"
-        exit 1
-      fi
-
-      echo "$body"
-    }
-
-    # Start analysis
-    echo "⏳ Starting analysis..."
-    analysis=$(api_call POST /analysis "{
-      \"site_uuid\":\"$site_uuid\",
-      \"scope\":\"site\",
-      \"models\":[\"openai\",\"claude\",\"perplexity\"]
-    }")
-
-    analysis_uuid=$(echo "$analysis" | jq -r '.analysis.uuid')
-    echo "📊 Analysis UUID: $analysis_uuid"
-    echo ""
-
-    # Poll with cancellation support
-    trap 'echo ""; echo "⚠️ Cancelled. UUID: $analysis_uuid"; exit 130' INT
-
-    attempt=0
-    while [ $attempt -lt 60 ]; do
-      status_resp=$(api_call GET "/analysis/$analysis_uuid")
-      status=$(echo "$status_resp" | jq -r '.analysis.status')
-
-      case $status in
-        completed|partial)
-          echo "✅ Analysis complete!"
-          break
-          ;;
-        failed)
-          echo "❌ Analysis failed"
-          exit 1
-          ;;
-        *)
-          printf "\r⏳ Analyzing... %dm %ds" $((attempt/6)) $((attempt%6*10))
-          sleep 10
-          ((attempt++))
-          ;;
-      esac
-    done
-
-    trap - INT
-
-    if [ $attempt -eq 60 ]; then
-      echo ""
-      echo "⏰ Timeout. UUID: $analysis_uuid"
-      exit 1
-    fi
-
-    # Fetch and display results
-    echo ""
-    echo "⏳ Fetching results..."
-    competitors=$(api_call GET "/analysis/$analysis_uuid/competitors")
-    keywords=$(api_call GET "/analysis/$analysis_uuid/keywords")
-
-    echo ""
-    echo "📊 Top Competitors:"
-    echo "$competitors" | jq -r '.competitors[:10][] | "  \(.rank // "?"). \(.company_name) - \(.mentions) mentions"'
-
-    echo ""
-    echo "🔑 Top Keywords:"
-    echo "$keywords" | jq -r '.keywords[:10][] | "  • \(.keyword) (\(.frequency)x)"'
-
-    # Show balance
-    echo ""
-    usage=$(api_call GET /usage)
-    balance=$(echo "$usage" | jq -r '.balance')
-    echo "💰 Remaining: $balance credits"
-    echo ""
-    echo "💡 Next: /botsee content"
-    ;;
-
+```bash
+python3 ~/.claude/skills/botsee/scripts/botsee.py signup --api-key <extracted-key>
 ```
 
-  "content")
-    # /botsee content - Generate blog post from analysis
-    echo "🤖 BotSee Content Generator"
-    echo "💡 Cost: 15 credits"
-    echo ""
+**Step 3: User runs create-site**
 
-    # Read config
-    if [ ! -f ~/.botsee/config.json ]; then
-      echo "❌ Not configured. Run: /botsee setup"
-      exit 1
-    fi
+After saving the API key, the user can run:
+```bash
+python3 ~/.claude/skills/botsee/scripts/botsee.py create-site <domain>
+```
 
-    api_key=$(jq -r '.api_key' ~/.botsee/config.json)
+**IMPORTANT: Agent behavior when user pastes API key**
 
-    # Inline API call helper
-    api_call() {
-      local method="$1" endpoint="$2" data="$3"
-      local resp=$(curl -s -m 30 -w "\n%{http_code}" \
-        -X "$method" \
-        -H "Authorization: Bearer $api_key" \
-        -H "Content-Type: application/json" \
-        ${data:+-d "$data"} \
-        "https://botsee.io/v1$endpoint")
+When you detect a BotSee API key in the conversation (format: `bts_live_*` or `bts_test_*`):
+1. Automatically run `signup --api-key <key>` to save it
+2. Confirm to the user: "✅ API key saved! You can now run /botsee create-site <domain>"
+3. Do NOT ask the user to manually run the signup command with the key
 
-      local code=$(echo "$resp" | tail -n1)
-      local body=$(echo "$resp" | head -n-1)
+**Example conversation:**
+```
+User: /botsee signup
+Assistant: [runs signup, gets URL] "Visit https://botsee.io/setup/TOKEN to complete signup. Paste your API key here when you get it."
 
-      case $code in
-        200|201) echo "$body" ;;
-        402)
-          echo "❌ Insufficient credits (need 15)"
-          echo "$body" | jq -r '.balance // empty' 2>/dev/null
-          exit 1
-          ;;
-        *)
-          echo "❌ API error ($code)"
-          exit 1
-          ;;
-      esac
-    }
+User: "Here's my API key: bts_live_abc123def456"
+Assistant: [automatically runs: signup --api-key bts_live_abc123def456]
+         "✅ API key saved! Run /botsee create-site <your-domain> to set up your site."
 
-    # Get latest site and analysis
-    sites=$(api_call GET /sites)
-    site_uuid=$(echo "$sites" | jq -r '.sites[0].uuid // empty')
+User: /botsee create-site https://example.com
+Assistant: [runs create-site, which uses saved API key]
+```
 
-    if [ -z "$site_uuid" ]; then
-      echo "❌ No sites found. Run: /botsee setup"
-      exit 1
-    fi
+Existing user (has API key):
 
-    analyses=$(api_call GET "/sites/$site_uuid/analysis?limit=1")
-    analysis_uuid=$(echo "$analyses" | jq -r '.analyses[0].uuid // empty')
+```bash
+python3 ~/.claude/skills/botsee/scripts/botsee.py signup --api-key <key>
+```
 
-    if [ -z "$analysis_uuid" ]; then
-      echo "❌ No analyses found. Run: /botsee analyze"
-      exit 1
-    fi
+**What happens:**
+1. Validates API key
+2. Saves API key to `~/.botsee/config.json`
 
-    # Generate content
-    echo "⏳ Generating blog post..."
-    content_resp=$(api_call POST "/analysis/$analysis_uuid/content" '{}')
-    content=$(echo "$content_resp" | jq -r '.content')
-    credits=$(echo "$content_resp" | jq -r '.credits_used')
+**Crypto flow (USDC on Base):**
+```bash
+python3 ~/.claude/skills/botsee/scripts/botsee.py signup --crypto
+python3 ~/.claude/skills/botsee/scripts/botsee.py signup-pay-usdc --amount-cents 250 --from-address 0x...
+python3 ~/.claude/skills/botsee/scripts/botsee.py signup-status
+```
 
-    echo ""
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo "$content"
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo ""
-    echo "💰 Used: $credits credits"
-    echo ""
-    read -p "Save to file? (y/n) " save
+USDC network:
+- `base-mainnet` (Chain ID 8453)
 
-    if [ "$save" = "y" ]; then
-      filename="botsee-$(date +%Y%m%d-%H%M%S).md"
-      echo "$content" > "$filename"
-      echo "✅ Saved: $filename"
-    fi
-    ;;
+### /botsee signup-pay-usdc --amount-cents N --from-address 0x... [--token TOKEN] [--tx-hash 0x...]
 
-  *)
-    echo "❌ Unknown command: $command"
-    echo ""
-    echo "Available commands:"
-    echo "  /botsee          - Status and help"
-    echo "  /botsee setup    - Configure API key"
-    echo "  /botsee analyze  - Run analysis"
-    echo "  /botsee content  - Generate content"
-    exit 1
-    ;;
-esac
+```bash
+python3 ~/.claude/skills/botsee/scripts/botsee.py signup-pay-usdc --amount-cents 5000 --from-address 0x1234...
+```
+
+Use `--payment <proof>` to send x402 `payment` header when retrying after HTTP 402.
+Use `--tx-hash <0x...>` to auto-build transaction-based x402 payload (`txHash`, `network`, `asset`, `amount`, `payer`).
+
+### /botsee signup-status [--token TOKEN]
+
+```bash
+python3 ~/.claude/skills/botsee/scripts/botsee.py signup-status
+```
+
+Saves API key to `~/.botsee/config.json` automatically once signup is completed.
+
+### /botsee topup-usdc --amount-cents N --from-address 0x... [--tx-hash 0x...]
+
+```bash
+python3 ~/.claude/skills/botsee/scripts/botsee.py topup-usdc --amount-cents 5000 --from-address 0x1234...
+```
+
+Use `--payment <proof>` to send x402 `payment` header when retrying after HTTP 402.
+Use `--tx-hash <0x...>` to auto-build transaction-based x402 payload (`txHash`, `network`, `asset`, `amount`, `payer`).
+
+### /botsee create-site <domain> [--types T] [--personas P] [--questions Q]
+
+**Requires:** API key from `/botsee signup`
+
+```bash
+python3 ~/.claude/skills/botsee/scripts/botsee.py create-site <domain>
+```
+
+**Optional parameters:**
+- `--types` (default: 2, range: 1-3)
+- `--personas` (default: 2, range: 1-3)
+- `--questions` (default: 5, range: 3-10)
+
+**What happens:**
+1. Creates a site for the domain
+2. Generates customer types, personas, and questions
+3. Saves configuration to workspace and user config
+
+**Customize generation counts:**
+```bash
+python3 ~/.claude/skills/botsee/scripts/botsee.py create-site <domain> --types 3 --personas 2 --questions 10
+```
+
+### /botsee config-show
+
+```bash
+python3 ~/.claude/skills/botsee/scripts/botsee.py config-show
+```
+
+### /botsee analyze
+
+```bash
+python3 ~/.claude/skills/botsee/scripts/botsee.py analyze
+```
+
+Starts analysis, polls until complete, then displays competitors, keywords, and sources.
+
+### /botsee content
+
+```bash
+python3 ~/.claude/skills/botsee/scripts/botsee.py content
+```
+
+Generates blog post from latest analysis. Auto-saves to `botsee-YYYYMMDD-HHMMSS.md`.
+
+---
+
+## Sites Commands
+
+### /botsee list-sites
+
+```bash
+python3 ~/.claude/skills/botsee/scripts/botsee.py list-sites
+```
+
+### /botsee get-site [uuid]
+
+```bash
+python3 ~/.claude/skills/botsee/scripts/botsee.py get-site [uuid]
+```
+
+If uuid is omitted, uses the site from `~/.botsee/config.json`.
+
+### /botsee create-site <domain>
+
+```bash
+python3 ~/.claude/skills/botsee/scripts/botsee.py create-site <domain>
+```
+
+### /botsee archive-site [uuid]
+
+```bash
+python3 ~/.claude/skills/botsee/scripts/botsee.py archive-site [uuid]
+```
+
+---
+
+## Customer Types Commands
+
+### /botsee list-types
+
+```bash
+python3 ~/.claude/skills/botsee/scripts/botsee.py list-types
+```
+
+### /botsee get-type <uuid>
+
+```bash
+python3 ~/.claude/skills/botsee/scripts/botsee.py get-type <uuid>
+```
+
+### /botsee create-type <name> [description]
+
+```bash
+python3 ~/.claude/skills/botsee/scripts/botsee.py create-type "Enterprise Buyers" "Large companies seeking solutions"
+```
+
+### /botsee generate-types [count]
+
+```bash
+python3 ~/.claude/skills/botsee/scripts/botsee.py generate-types 3
+```
+
+Defaults to 2 if count is omitted.
+
+### /botsee update-type <uuid> [name] [description]
+
+```bash
+python3 ~/.claude/skills/botsee/scripts/botsee.py update-type <uuid> --name "New Name" --description "New description"
+```
+
+### /botsee archive-type <uuid>
+
+```bash
+python3 ~/.claude/skills/botsee/scripts/botsee.py archive-type <uuid>
+```
+
+---
+
+## Personas Commands
+
+### /botsee list-personas [type_uuid]
+
+```bash
+python3 ~/.claude/skills/botsee/scripts/botsee.py list-personas
+python3 ~/.claude/skills/botsee/scripts/botsee.py list-personas <type_uuid>
+```
+
+### /botsee get-persona <uuid>
+
+```bash
+python3 ~/.claude/skills/botsee/scripts/botsee.py get-persona <uuid>
+```
+
+### /botsee create-persona <type_uuid> <name> [description]
+
+```bash
+python3 ~/.claude/skills/botsee/scripts/botsee.py create-persona <type_uuid> "Sarah Chen" "VP of Marketing at mid-sized SaaS company"
+```
+
+### /botsee generate-personas <type_uuid> [count]
+
+```bash
+python3 ~/.claude/skills/botsee/scripts/botsee.py generate-personas <type_uuid> 3
+```
+
+Defaults to 2 if count is omitted.
+
+### /botsee update-persona <uuid> [name] [description]
+
+```bash
+python3 ~/.claude/skills/botsee/scripts/botsee.py update-persona <uuid> --name "New Name" --description "New description"
+```
+
+### /botsee archive-persona <uuid>
+
+```bash
+python3 ~/.claude/skills/botsee/scripts/botsee.py archive-persona <uuid>
+```
+
+---
+
+## Questions Commands
+
+### /botsee list-questions [persona_uuid]
+
+```bash
+python3 ~/.claude/skills/botsee/scripts/botsee.py list-questions
+python3 ~/.claude/skills/botsee/scripts/botsee.py list-questions <persona_uuid>
+```
+
+### /botsee get-question <uuid>
+
+```bash
+python3 ~/.claude/skills/botsee/scripts/botsee.py get-question <uuid>
+```
+
+### /botsee create-question <persona_uuid> <question_text>
+
+```bash
+python3 ~/.claude/skills/botsee/scripts/botsee.py create-question <persona_uuid> "What are the best email marketing tools?"
+```
+
+### /botsee generate-questions <persona_uuid> [count]
+
+```bash
+python3 ~/.claude/skills/botsee/scripts/botsee.py generate-questions <persona_uuid> 5
+```
+
+Defaults to 5 if count is omitted.
+
+### /botsee update-question <uuid> <question_text>
+
+```bash
+python3 ~/.claude/skills/botsee/scripts/botsee.py update-question <uuid> "What are the best affordable email marketing tools?"
+```
+
+### /botsee delete-question <uuid>
+
+```bash
+python3 ~/.claude/skills/botsee/scripts/botsee.py delete-question <uuid>
+```
+
+---
+
+## Results Commands
+
+### /botsee results-competitors <analysis_uuid>
+
+```bash
+python3 ~/.claude/skills/botsee/scripts/botsee.py results-competitors <analysis_uuid>
+```
+
+### /botsee results-keywords <analysis_uuid>
+
+```bash
+python3 ~/.claude/skills/botsee/scripts/botsee.py results-keywords <analysis_uuid>
+```
+
+### /botsee results-sources <analysis_uuid>
+
+```bash
+python3 ~/.claude/skills/botsee/scripts/botsee.py results-sources <analysis_uuid>
+```
+
+### /botsee results-responses <analysis_uuid>
+
+```bash
+python3 ~/.claude/skills/botsee/scripts/botsee.py results-responses <analysis_uuid>
+```
+
+**Getting the Analysis UUID:**
+The analysis UUID is displayed when you run `/botsee analyze`:
+```
+📊 Analysis started: abc-def-123
+```
+Copy the UUID and use it with the results commands to view detailed analysis data.
+
+---
+
+## Agent Usage Notes
+
+This skill is designed for **non-interactive agent usage**. All commands accept arguments via command-line flags - no prompts or user input required.
+
+### Key Considerations for Agents
+
+**1. Signup Flow Requires Human Intervention**
+
+For **new users** without an API key, the signup command creates a signup token and displays a URL:
+```bash
+/botsee signup
+# Outputs signup URL for browser completion
+```
+
+**Agents should:**
+- Use the `--api-key` flag if API key is available
+- Inform user if signup is needed (cannot be completed by agent)
+- Consider API key as a prerequisite for autonomous operation
+
+**2. Async Operations with Polling**
+
+Two commands can involve waiting/polling:
+- `/botsee signup-status` (checks signup completion)
+- `/botsee analyze`: up to 10 minute timeout
+
+Commands will block until complete or timeout. No intermediate progress updates.
+
+**3. Analysis Discovery**
+
+To view detailed results after analysis:
+1. Run `/botsee analyze` and capture the analysis UUID from output
+2. Use UUID with `/botsee results-*` commands
+
+**Recommended pattern:**
+```bash
+# Run analysis
+output=$(/botsee analyze)
+# Extract UUID (line containing "Analysis started:")
+uuid=$(echo "$output" | grep "Analysis started:" | awk '{print $NF}')
+# View results
+/botsee results-competitors "$uuid"
+```
+
+**4. Configuration Files**
+
+Two config files exist:
+- **User config:** `~/.botsee/config.json` (API key + site UUID)
+- **Workspace config:** `.context/botsee-config.json` (generation defaults, optional)
+
+Agents can discover state via:
+- `/botsee` - Shows account status
+- `/botsee config-show` - Shows workspace config
+
+**5. Credit Costs**
+
+All operations that consume credits display remaining balance. Agents should:
+- Check balance before expensive operations (`/botsee` command)
+- Handle "Insufficient credits" errors gracefully
+- Monitor credit usage (shown after each operation)
+
+**Costs:**
+- Setup (~75 credits with defaults 2/2/5)
+- Analysis (~660 credits per run)
+- Content generation (15 credits)
+
+**6. Error Handling**
+
+All errors exit with code 1 and print to stderr. Error messages include:
+- HTTP status codes (when relevant)
+- Actionable next steps
+- No API key leakage (sanitized)
+
+**7. Idempotency**
+
+- **Safe to retry:** Status, list, get commands (read-only)
+- **Not idempotent:** Create commands (will create duplicates)
+- **Updates:** Require specific UUID, safe to retry
+
+**8. Output Format**
+
+- **CRUD operations:** JSON output for parsing
+- **Workflow commands:** Human-readable formatted text
+- **Status/balance:** Always displayed at command completion
+
+### Example Agent Workflow
+
+```bash
+# 1. Check status (discover state)
+/botsee
+
+# 2. Save API key if provided by user
+/botsee signup --api-key bts_live_abc123
+
+# 3. Create a site
+/botsee create-site https://example.com
+
+# 4. Run analysis (captures UUID)
+analysis_output=$(/botsee analyze)
+uuid=$(echo "$analysis_output" | grep -oP '(?<=Analysis started: )\S+')
+
+# 5. View results
+/botsee results-competitors "$uuid"
+
+# 6. Generate content
+/botsee content
+
+# 7. Check final balance
+/botsee
 ```
