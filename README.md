@@ -1,8 +1,17 @@
 # BotSee Skill for Claude Code
 
-> Get AI-powered competitive intelligence in Claude Code
+> Monitor your brand's AI visibility across ChatGPT, Claude, Perplexity, and Gemini.
 
-BotSee analyzes any website to identify competitors, keywords, and content opportunities using multiple AI models (OpenAI, Claude, Perplexity, Gemini, Grok).
+**Version:** 0.2.2
+
+BotSee is an agent-first API that delivers structured data from every major AI search engine — competitors, keywords, sources, and raw responses — programmatically, from Claude Code.
+
+- Find competitors as AI search engines see them
+- Measure share of voice vs competitors
+- Identify which sources AI cites for your category
+- Uncover exact search queries AI runs for your space
+- Generate AI-optimized content from analysis data
+- Track visibility over time with historical analysis
 
 ## Installation
 
@@ -111,7 +120,7 @@ Based on those keywords and competitor insights, give me 5 compelling blog post 
 Write a full blog post for the first title, including our competitive position, opportunities, threats, and recommended actions based on the analysis data.
 ```
 
-**Total cost:** ~725 credits ($7.25) | **Time:** ~15 minutes
+**Total cost:** ~725 credits ($7.25 at $0.01/credit) | **Time:** ~15 minutes
 **Output:** Competitor rankings with percentages, keyword frequency analysis, and strategic blog content
 
 ## Commands
@@ -667,45 +676,6 @@ Next: /botsee analyze
 /botsee results-responses
 ```
 
-## Upgrading from v1.0.0
-
-Version 2.0.0 introduces **breaking changes** to make the skill agent-friendly and non-interactive.
-
-### What Changed
-
-**v1.0.0 (Interactive):**
-```bash
-/botsee setup
-# Then: interactive prompts, feedback loops, regeneration options
-```
-
-**v2.0.0 (Non-Interactive):**
-```bash
-/botsee setup <domain> --api-key <key>
-# All parameters via command-line arguments, no prompts
-```
-
-### Migration Steps
-
-1. **Reconfigure your site:**
-   - Old config files are incompatible
-   - Run `/botsee setup <domain> --api-key <your_key>` to recreate config
-
-2. **Update your workflows:**
-   - Remove any automation that expects interactive prompts
-   - Pass all parameters as command-line arguments
-   - Content auto-saves (no save prompt)
-
-3. **New features:**
-   - `/botsee create-site` - Pre-save custom generation counts
-   - `/botsee config-show` - View saved configuration
-   - Results commands now require `<analysis_uuid>` parameter
-
-### Backward Compatibility
-
-❌ **No backward compatibility** - v2.0.0 is a complete redesign. If you need the interactive workflow, stay on v1.0.0.
-
----
 
 ## Configuration Management
 
@@ -840,6 +810,8 @@ rm .context/botsee-config.json  # Remove workspace config
 - **Solution:** Re-run `/botsee analyze` and copy the UUID from output
 
 ## Credits & Costs
+
+**Credit rate:** 1 credit = $0.01 USD | **Minimum purchase:** $20 (2,000 credits) | All CRUD operations are free
 
 ### Setup (one-time with defaults)
 - Site creation: **5 credits**
