@@ -17,7 +17,7 @@ import urllib.request
 from pathlib import Path
 
 # Version
-__version__ = "0.2.1"
+__version__ = "0.2.2"
 
 # API Configuration
 BASE_URL = "https://botsee.io"
@@ -38,6 +38,8 @@ HTTP_CREATED = 201
 HTTP_ACCEPTED = 202
 HTTP_NO_CONTENT = 204
 HTTP_PAYMENT_REQUIRED = 402
+HTTP_NOT_FOUND = 404
+HTTP_GONE = 410
 
 # Validation Ranges
 TYPES_MIN, TYPES_MAX = 1, 3
@@ -601,6 +603,11 @@ def signup_resume():
     poll_resp, poll_status, _ = api_call("GET", poll_url)
 
     if poll_status == HTTP_OK:
+        response_setup_url = poll_resp.get("setup_url")
+        if response_setup_url and response_setup_url != pending.get("setup_url"):
+            pending["setup_url"] = response_setup_url
+            save_pending_signup(pending)
+
         signup_status = poll_resp.get("status")
         if signup_status == "completed":
             api_key = poll_resp.get("api_key")
@@ -617,11 +624,23 @@ def signup_resume():
                 return
         elif signup_status == "expired":
             clear_pending_signup()
-            print("Signup token expired. Run /botsee signup again.", file=sys.stderr)
+            print("Signup token expired. Run /botsee signup --reset to start over.", file=sys.stderr)
             sys.exit(1)
+    elif poll_status in (HTTP_NOT_FOUND, HTTP_GONE):
+        clear_pending_signup()
+        print("Signup link is invalid or expired. Run /botsee signup --reset for a new setup URL.", file=sys.stderr)
+        sys.exit(1)
+    else:
+        print(f"Signup status check failed (HTTP {poll_status}): {poll_resp}", file=sys.stderr)
+        if poll_status == HTTP_PAYMENT_REQUIRED:
+            show_payment_required_help(poll_resp)
+        sys.exit(1)
 
     # Still pending
     setup_url = pending.get("setup_url")
+    if not setup_url:
+        print("Signup is still pending but no setup URL is available. Run /botsee signup --reset to start over.", file=sys.stderr)
+        sys.exit(1)
     print(f"📋 Signup not yet complete. Please visit:")
     print(f"")
     print(f"   {setup_url}")
@@ -708,6 +727,11 @@ def cmd_signup(args):
     # If API key provided directly, save it and skip signup
     if hasattr(args, 'api_key') and args.api_key:
         return signup_save_key(args.api_key)
+
+    if getattr(args, "reset", False):
+        if PENDING_SIGNUP.exists():
+            print("Discarding pending signup state...", file=sys.stderr)
+        clear_pending_signup()
 
     if PENDING_SIGNUP.exists():
         return signup_resume()
@@ -808,10 +832,22 @@ def cmd_signup_status(args):
     resp, status, _ = api_call("GET", f"/signup/{token}/status")
 
     if status != HTTP_OK:
+        if status in (HTTP_NOT_FOUND, HTTP_GONE):
+            pending = load_pending_signup()
+            if pending and pending.get("setup_token") == token:
+                clear_pending_signup()
+            print("Signup link is invalid or expired. Run /botsee signup --reset for a new setup URL.", file=sys.stderr)
+            sys.exit(1)
         print(f"Signup status check failed (HTTP {status}): {resp}", file=sys.stderr)
         if status == HTTP_PAYMENT_REQUIRED:
             show_payment_required_help(resp)
         sys.exit(1)
+
+    pending = load_pending_signup()
+    response_setup_url = resp.get("setup_url")
+    if pending and pending.get("setup_token") == token and response_setup_url and response_setup_url != pending.get("setup_url"):
+        pending["setup_url"] = response_setup_url
+        save_pending_signup(pending)
 
     signup_status = resp.get("status", "unknown")
     payment_method = resp.get("payment_method")
@@ -831,7 +867,6 @@ def cmd_signup_status(args):
             resp.get("contact_email"),
             resp.get("company_name"),
         )
-        pending = load_pending_signup()
         if pending and pending.get("setup_token") == token:
             clear_pending_signup()
 
@@ -840,13 +875,11 @@ def cmd_signup_status(args):
         return
 
     if signup_status == "expired":
-        pending = load_pending_signup()
         if pending and pending.get("setup_token") == token:
             clear_pending_signup()
         print("Signup token expired. Run /botsee signup again.", file=sys.stderr)
         sys.exit(1)
 
-    pending = load_pending_signup()
     if pending and pending.get("setup_url"):
         print(f"Complete in browser: {pending['setup_url']}")
 
@@ -1728,6 +1761,11 @@ def main():
     signup_parser.add_argument("--company", help="Company name (optional)")
     signup_parser.add_argument("--api-key", help="API key if you already have one (skips signup flow)")
     signup_parser.add_argument("--webhook-url", help="Webhook URL for signup completion notification")
+    signup_parser.add_argument(
+        "--reset",
+        action="store_true",
+        help="Discard pending signup state and create a new signup link",
+    )
 
     signup_usdc_parser = subparsers.add_parser(
         "signup-usdc",

@@ -1,12 +1,12 @@
 ---
 name: botsee
-description: AI-powered competitive intelligence via BotSee API
-version: 0.2.1
+description: Monitor your brand's AI visibility via BotSee API
+version: 0.2.2
 ---
 
 # BotSee Skill
 
-Get AI-powered competitive intelligence on any website.
+Monitor your brand's AI visibility (AI SEO/GEO) across ChatGPT, Claude, Perplexity, and Gemini. Provided by botsee.io, the AI Visibility tool for Claude Code and agents.
 
 Commands:
 
