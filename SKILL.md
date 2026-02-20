@@ -77,7 +77,15 @@ python3 ~/.claude/skills/botsee/scripts/botsee.py status
 python3 ~/.claude/skills/botsee/scripts/botsee.py signup
 ```
 
-This displays a signup URL. Tell the user: "Visit this URL to complete signup and get your API key. Then paste your API key here."
+The command prints a line like:
+```
+Complete signup: https://app.botsee.io/setup?token=...
+```
+
+Extract that URL and tell the user:
+"To complete your BotSee signup, visit this URL: **[URL from above]**
+
+After completing signup, paste your API key here."
 
 **Step 2: User pastes API key in conversation**
 
@@ -114,12 +122,15 @@ python3 ~/.claude/skills/botsee/scripts/botsee.py signup-usdc
 ```
 (no `--no-email` flag)
 
-The response includes a `setup_url`. Tell the user:
+The command prints a line like:
+```
+Setup URL: https://app.botsee.io/setup?token=...
+```
 
-> "Visit this URL to enter and verify your email and read the setup instructions:
-> `<setup_url from response>`
->
-> Once you've done that, come back here and we'll complete the USDC payment."
+Extract that URL and tell the user:
+"Visit this URL to enter and verify your email and read the setup instructions: **[URL from above]**
+
+Once you've done that, come back here and we'll complete the USDC payment."
 
 Do NOT call `signup-pay-usdc` yet. Wait for the user to confirm they've completed the setup URL step.
 
