@@ -20,7 +20,7 @@ from pathlib import Path
 __version__ = "0.2.3"
 
 # API Configuration
-BASE_URL = "https://botsee.io"
+BASE_URL = os.environ.get("BOTSEE_BASE_URL", "https://botsee.io")
 
 # File Paths
 USER_CONFIG = Path.home() / ".botsee" / "config.json"
