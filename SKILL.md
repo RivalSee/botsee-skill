@@ -57,6 +57,8 @@ Commands:
 - /botsee results-keywords <uuid>       - View keyword results
 - /botsee results-sources <uuid>        - View source results
 - /botsee results-responses <uuid>      - View all AI responses
+- /botsee results-keyword-opportunities <uuid> [--threshold 0.0-1.0] [--rank-threshold N] - Questions where brand is missing or ranks poorly
+- /botsee results-source-opportunities <uuid>  - Sources AI cited when brand was NOT mentioned
 
 ## Implementation
 
@@ -423,6 +425,27 @@ python3 ~/.claude/skills/botsee/scripts/botsee.py results-sources <analysis_uuid
 ```bash
 python3 ~/.claude/skills/botsee/scripts/botsee.py results-responses <analysis_uuid>
 ```
+
+### /botsee results-keyword-opportunities <analysis_uuid> [--threshold N] [--rank-threshold N]
+
+```bash
+python3 ~/.claude/skills/botsee/scripts/botsee.py results-keyword-opportunities <analysis_uuid>
+python3 ~/.claude/skills/botsee/scripts/botsee.py results-keyword-opportunities <analysis_uuid> --threshold 0.8
+python3 ~/.claude/skills/botsee/scripts/botsee.py results-keyword-opportunities <analysis_uuid> --rank-threshold 3
+```
+
+Returns questions where the brand's mention rate is below the threshold, with per-provider breakdown showing which AI models missed the brand, what rank it appeared at (if at all), and the search keywords each provider used.
+
+- `--threshold` (0.0–1.0, default 1.0): questions where `mention_rate < threshold` qualify. At 1.0, any question not mentioned in every response is included.
+- `--rank-threshold` (integer): additionally flags questions where brand appeared but at rank worse than this value.
+
+### /botsee results-source-opportunities <analysis_uuid>
+
+```bash
+python3 ~/.claude/skills/botsee/scripts/botsee.py results-source-opportunities <analysis_uuid>
+```
+
+Returns sources that AI cited in responses where the brand was NOT mentioned — ideal targets for content and link-building campaigns.
 
 **Getting the Analysis UUID:**
 The analysis UUID is displayed when you run `/botsee analyze`:

@@ -1641,6 +1641,32 @@ def cmd_results_responses(args):
     print(json.dumps(responses, indent=2))
 
 
+def cmd_results_keyword_opportunities(args):
+    """Get keyword opportunities from analysis."""
+    config = require_user_config()
+    params = {}
+    if args.threshold is not None:
+        params["threshold"] = args.threshold
+    if args.rank_threshold is not None:
+        params["rank_threshold"] = args.rank_threshold
+    resp, status, _ = api_call(
+        "GET",
+        f"/analysis/{args.analysis_uuid}/keyword_opportunities",
+        api_key=config["api_key"],
+        params=params or None,
+    )
+    if status != HTTP_OK:
+        print(f"Failed (HTTP {status}): {resp}", file=sys.stderr)
+        sys.exit(1)
+    print(json.dumps(resp, indent=2))
+
+
+def cmd_results_source_opportunities(args):
+    """Get source opportunities from analysis."""
+    resp = api_get(f"/analysis/{args.analysis_uuid}/source_opportunities")
+    print(json.dumps(resp, indent=2))
+
+
 def cmd_list_analyses(args):
     """List analysis runs for a site."""
     config = require_user_config()
@@ -1933,6 +1959,14 @@ def main():
     results_resp_parser = subparsers.add_parser("results-responses", help="Get raw responses")
     results_resp_parser.add_argument("analysis_uuid", help="Analysis UUID")
 
+    results_kw_opp_parser = subparsers.add_parser("results-keyword-opportunities", help="Get keyword opportunities")
+    results_kw_opp_parser.add_argument("analysis_uuid", help="Analysis UUID")
+    results_kw_opp_parser.add_argument("--threshold", type=float, help="Mention rate threshold 0.0-1.0 (default 1.0)")
+    results_kw_opp_parser.add_argument("--rank-threshold", dest="rank_threshold", type=int, help="Flag questions where brand ranked worse than this position")
+
+    results_src_opp_parser = subparsers.add_parser("results-source-opportunities", help="Get source opportunities")
+    results_src_opp_parser.add_argument("analysis_uuid", help="Analysis UUID")
+
     # Analysis listing
     list_analyses_parser = subparsers.add_parser("list-analyses", help="List analysis runs for a site")
     list_analyses_parser.add_argument("--site-uuid", help="Site UUID (defaults to active site)")
@@ -1989,6 +2023,8 @@ def main():
         "results-keywords": cmd_results_keywords,
         "results-sources": cmd_results_sources,
         "results-responses": cmd_results_responses,
+        "results-keyword-opportunities": cmd_results_keyword_opportunities,
+        "results-source-opportunities": cmd_results_source_opportunities,
         "list-analyses": cmd_list_analyses,
         "get-question-results": cmd_get_question_results,
     }
