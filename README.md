@@ -2,7 +2,7 @@
 
 > Monitor your brand's AI visibility across ChatGPT, Claude, Perplexity, and Gemini.
 
-**Version:** 0.2.3
+**Version:** 0.2.4
 
 BotSee is an agent-first API that delivers structured data from every major AI search engine — competitors, keywords, sources, and raw responses — programmatically, from Claude Code.
 
@@ -532,6 +532,25 @@ View all raw AI responses from the latest analysis.
 
 ```bash
 /botsee results-responses
+```
+
+#### `/botsee results-keyword-opportunities <analysis_uuid>`
+Questions where your brand is missing or ranks poorly, with per-provider breakdown showing mention rates, rank positions, and exact keywords each AI used.
+
+```bash
+/botsee results-keyword-opportunities <analysis_uuid>
+/botsee results-keyword-opportunities <analysis_uuid> --threshold 0.8
+/botsee results-keyword-opportunities <analysis_uuid> --rank-threshold 3
+```
+
+- `--threshold` (0.0–1.0, default 1.0): include questions where brand mention rate is below this value
+- `--rank-threshold` (integer): also flag questions where brand appeared but at a rank worse than this
+
+#### `/botsee results-source-opportunities <analysis_uuid>`
+Sources AI cited in responses where your brand was NOT mentioned — ideal targets for content and link-building.
+
+```bash
+/botsee results-source-opportunities <analysis_uuid>
 ```
 
 ## Full CRUD Operations
