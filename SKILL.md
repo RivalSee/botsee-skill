@@ -1,7 +1,7 @@
 ---
 name: botsee
 description: Monitor your brand's AI visibility via BotSee API
-version: 0.2.4
+version: 0.2.5
 ---
 
 # BotSee Skill
@@ -87,22 +87,16 @@ Complete signup: https://app.botsee.io/setup?token=...
 Extract that URL and tell the user:
 "To complete your BotSee signup, visit this URL: **[URL from above]**
 
-After completing signup, paste your API key here."
+After completing signup on that page, come back here and run /botsee signup-status."
 
-**Step 2: User pastes API key in conversation**
+**Step 2: Save your API key**
 
-When the user provides their API key (e.g., "Here's my API key: bts_live_abc123"), extract it and save it:
+After completing signup on that page, run:
 
-```bash
-python3 ~/.claude/skills/botsee/scripts/botsee.py signup --api-key <extracted-key>
-```
+/botsee signup-status
 
-**IMPORTANT: Agent behavior when user pastes API key**
-
-When you detect a BotSee API key in the conversation (format: `bts_live_*` or `bts_test_*`):
-1. Automatically run `signup --api-key <key>` to save it
-2. Confirm to the user: "✅ API key saved! You can now run /botsee create-site <domain>"
-3. Do NOT ask the user to manually run the signup command with the key
+The script retrieves your API key from the server automatically using your signup token.
+If prompted for a token, use the token from the URL on the setup page.
 
 ### /botsee signup-usdc [--email EMAIL] [--name NAME] [--company COMPANY] [--no-email]
 

@@ -2,6 +2,16 @@
 
 All notable changes to the BotSee Claude Code Skill are documented here.
 
+## [0.2.5] - 2026-02-24
+
+### Security
+
+- Removed passive API key detection from SKILL.md to eliminate prompt injection vector;
+  keys are now retrieved programmatically via /botsee signup-status
+- Removed self-update mechanism (cmd_update, download_github_release, install_update)
+  to eliminate supply chain risk from unverified GitHub downloads; updates are handled
+  via the plugin marketplace
+
 ## [0.2.4] - 2026-02-22
 
 ### Added
