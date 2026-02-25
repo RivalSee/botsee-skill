@@ -727,8 +727,9 @@ def cmd_reset_api_key(args):
     resp, status = api_call("POST", "/api-keys/reset", data={"token": args.token})
 
     if status != HTTP_OK:
-        error = resp.get("error", {}) if isinstance(resp, dict) else {}
-        print(f"Error: {error.get('message', 'Failed to reset API key')} (HTTP {status})", file=sys.stderr)
+        error = resp.get("error", "Failed to reset API key") if isinstance(resp, dict) else "Failed to reset API key"
+        msg = error.get("message", str(error)) if isinstance(error, dict) else str(error)
+        print(f"Error: {msg} (HTTP {status})", file=sys.stderr)
         sys.exit(1)
 
     api_key_data = resp.get("api_key", {})
@@ -756,8 +757,9 @@ def cmd_rotate_api_key(args):
     resp, status = api_call("POST", f"/api-keys/{args.id}/rotate", api_key=config["api_key"])
 
     if status != 201:
-        error = resp.get("error", {}) if isinstance(resp, dict) else {}
-        print(f"Error: {error.get('message', 'Failed to rotate API key')} (HTTP {status})", file=sys.stderr)
+        error = resp.get("error", "Failed to rotate API key") if isinstance(resp, dict) else "Failed to rotate API key"
+        msg = error.get("message", str(error)) if isinstance(error, dict) else str(error)
+        print(f"Error: {msg} (HTTP {status})", file=sys.stderr)
         sys.exit(1)
 
     api_key_data = resp.get("api_key", {})
