@@ -722,6 +722,20 @@ def cmd_signup_status(args):
 
 
 
+def cmd_revoke_api_key(args):
+    """Revoke an API key by ID."""
+    config = require_user_config()
+    resp, status = api_call("DELETE", f"/api-keys/{args.id}", api_key=config["api_key"])
+
+    if status != 204:
+        error = resp.get("error", "Failed to revoke API key") if isinstance(resp, dict) else "Failed to revoke API key"
+        msg = error.get("message", str(error)) if isinstance(error, dict) else str(error)
+        print(f"Error: {msg} (HTTP {status})", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"✅ API key {args.id} revoked.")
+
+
 def cmd_reset_api_key(args):
     """Exchange a one-time reset token for a new API key."""
     resp, status = api_call("POST", "/api-keys/reset", data={"token": args.token})
@@ -1690,6 +1704,12 @@ def main():
     signup_status_parser = subparsers.add_parser("signup-status", help="Check signup token status")
     signup_status_parser.add_argument("--token", help="Signup token (defaults to pending signup token)")
 
+    revoke_api_key_parser = subparsers.add_parser(
+        "revoke-api-key",
+        help="Revoke an API key by ID",
+    )
+    revoke_api_key_parser.add_argument("--id", required=True, help="ID of the API key to revoke")
+
     reset_api_key_parser = subparsers.add_parser(
         "reset-api-key",
         help="Exchange a one-time reset token for a new API key",
@@ -1883,6 +1903,7 @@ def main():
         "signup": cmd_signup,
         "signup-usdc": cmd_signup_usdc,
         "signup-status": cmd_signup_status,
+        "revoke-api-key": cmd_revoke_api_key,
         "reset-api-key": cmd_reset_api_key,
         "rotate-api-key": cmd_rotate_api_key,
         "signup-pay-usdc": cmd_signup_pay_usdc,
