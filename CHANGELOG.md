@@ -8,6 +8,7 @@ All notable changes to the BotSee Claude Code Skill are documented here.
 
 - `reset-api-key --token TOKEN` command: exchanges a web-generated one-time token for a new API key saved to `~/.botsee/config.json`; token is generated from the API Keys page in the BotSee dashboard and expires in 15 minutes
 - `rotate-api-key --id KEY_ID` command: atomically rotates an existing API key via the authenticated API — creates a new key with the same name, revokes the old one, and saves the new key to config
+- `revoke-api-key --id KEY_ID` command: revokes an API key by ID via the authenticated API
 
 ### Fixed
 
