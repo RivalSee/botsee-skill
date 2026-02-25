@@ -721,6 +721,67 @@ def cmd_signup_status(args):
         print(f"Complete in browser: {pending['setup_url']}")
 
 
+
+def cmd_reset_api_key(args):
+    """Exchange a one-time reset token for a new API key."""
+    resp, status = api_call("POST", "/api-keys/reset", data={"token": args.token})
+
+    if status != HTTP_OK:
+        error = resp.get("error", "Failed to reset API key") if isinstance(resp, dict) else "Failed to reset API key"
+        msg = error.get("message", str(error)) if isinstance(error, dict) else str(error)
+        print(f"Error: {msg} (HTTP {status})", file=sys.stderr)
+        sys.exit(1)
+
+    api_key_data = resp.get("api_key", {})
+    raw_key = api_key_data.get("key")
+
+    if not raw_key:
+        print("Error: No API key returned from server", file=sys.stderr)
+        sys.exit(1)
+
+    # Preserve existing site_uuid from config
+    existing_config = load_user_config() or {}
+    site_uuid = existing_config.get("site_uuid")
+
+    save_user_config(raw_key, site_uuid)
+
+    print("✅ API key reset successfully.")
+    print(f"New key saved to ~/.botsee/config.json")
+    print("")
+    print("Next: Run /botsee to verify your account status")
+
+
+def cmd_rotate_api_key(args):
+    """Atomically rotate an API key: creates a new key, revokes the old one."""
+    config = require_user_config()
+    resp, status = api_call("POST", f"/api-keys/{args.id}/rotate", api_key=config["api_key"])
+
+    if status != 201:
+        error = resp.get("error", "Failed to rotate API key") if isinstance(resp, dict) else "Failed to rotate API key"
+        msg = error.get("message", str(error)) if isinstance(error, dict) else str(error)
+        print(f"Error: {msg} (HTTP {status})", file=sys.stderr)
+        sys.exit(1)
+
+    api_key_data = resp.get("api_key", {})
+    raw_key = api_key_data.get("key")
+
+    if not raw_key:
+        print("Error: No API key returned from server", file=sys.stderr)
+        sys.exit(1)
+
+    # Preserve existing site_uuid from config
+    existing_config = load_user_config() or {}
+    site_uuid = existing_config.get("site_uuid")
+
+    save_user_config(raw_key, site_uuid)
+
+    print("✅ API key rotated successfully.")
+    print(f"New key prefix: {api_key_data.get('key_prefix', '')}")
+    print(f"New key saved to ~/.botsee/config.json")
+    print("")
+    print("Your old key has been revoked.")
+
+
 def cmd_topup_usdc(args):
     """Add credits via USDC x402 challenge flow."""
     config = require_user_config()
@@ -1629,6 +1690,18 @@ def main():
     signup_status_parser = subparsers.add_parser("signup-status", help="Check signup token status")
     signup_status_parser.add_argument("--token", help="Signup token (defaults to pending signup token)")
 
+    reset_api_key_parser = subparsers.add_parser(
+        "reset-api-key",
+        help="Exchange a one-time reset token for a new API key",
+    )
+    reset_api_key_parser.add_argument("--token", required=True, help="Reset token from the BotSee web dashboard")
+
+    rotate_api_key_parser = subparsers.add_parser(
+        "rotate-api-key",
+        help="Atomically rotate an API key (creates new key, revokes old one)",
+    )
+    rotate_api_key_parser.add_argument("--id", required=True, help="ID of the API key to rotate")
+
     signup_pay_usdc_parser = subparsers.add_parser(
         "signup-pay-usdc",
         help="Pay for USDC signup via x402 challenge",
@@ -1810,6 +1883,8 @@ def main():
         "signup": cmd_signup,
         "signup-usdc": cmd_signup_usdc,
         "signup-status": cmd_signup_status,
+        "reset-api-key": cmd_reset_api_key,
+        "rotate-api-key": cmd_rotate_api_key,
         "signup-pay-usdc": cmd_signup_pay_usdc,
         "create-site": cmd_create_site,
         "config-show": cmd_config_show,
