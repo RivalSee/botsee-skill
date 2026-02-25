@@ -16,6 +16,8 @@ Commands:
 - /botsee signup-usdc [--email EMAIL] [--name NAME] [--company COMPANY] [--no-email] - Signup with USDC on Base
 - /botsee signup-pay-usdc --amount-cents N [--token TOKEN] [--payment PROOF] - Pay for USDC signup via x402
 - /botsee signup-status [--token TOKEN]    - Check signup completion and save API key
+- /botsee reset-api-key --token TOKEN    - Exchange a web-generated reset token for a new API key
+- /botsee rotate-api-key --id KEY_ID     - Atomically rotate an API key (creates new, revokes old)
 - /botsee topup-usdc --amount-cents N [--payment PROOF] - Add credits with USDC on Base via x402
 - /botsee create-site <domain> [--types N]   - Save custom config
 - /botsee config-show                      - Display saved config
@@ -173,6 +175,16 @@ python3 ~/.claude/skills/botsee/scripts/botsee.py signup-status
 ```
 
 Saves API key to `~/.botsee/config.json` automatically once signup is completed.
+
+### /botsee reset-api-key --token TOKEN
+
+```bash
+python3 ~/.claude/skills/botsee/scripts/botsee.py reset-api-key --token <token>
+```
+
+Exchanges a one-time reset token (generated on the BotSee web dashboard) for a new API key.
+The token is single-use and expires in 15 minutes.
+On success, the new key is saved to `~/.botsee/config.json` and the old key is revoked.
 
 ### /botsee topup-usdc --amount-cents N [--payment PROOF]
 
