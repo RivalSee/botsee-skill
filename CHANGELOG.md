@@ -2,6 +2,12 @@
 
 All notable changes to the BotSee Claude Code Skill are documented here.
 
+## [0.2.7] - 2026-02-25
+
+### Added
+
+- `recommend [analysis_uuid]` command: calls `POST /analysis/:uuid/recommendations` to generate AI-powered, prioritized recommendations for improving brand visibility in AI search engines (ChatGPT, Claude, Perplexity, Gemini); synthesizes keyword gaps, missed sources, and competitor data into specific, actionable steps with `high`/`medium`/`low` priority and optional `target_keywords`/`target_urls` enrichment fields; costs credits on first call, returns cached result at no cost on repeat calls for the same analysis
+
 ## [0.2.6] - 2026-02-25
 
 ### Added

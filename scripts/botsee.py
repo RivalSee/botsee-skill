@@ -13,7 +13,7 @@ import urllib.request
 from pathlib import Path
 
 # Version
-__version__ = "0.2.5"
+__version__ = "0.2.7"
 
 # API Configuration
 BASE_URL = os.environ.get("BOTSEE_BASE_URL", "https://botsee.io")
@@ -1149,6 +1149,59 @@ def cmd_content(args):
     print(f"✅ Saved: {filename}")
 
 
+def cmd_recommend(args):
+    """Get AI-generated recommendations to improve AI visibility."""
+    config = require_user_config()
+    api_key = config["api_key"]
+    site_uuid = config["site_uuid"]
+
+    analysis_uuid = args.analysis_uuid
+    if not analysis_uuid:
+        resp, status = api_call(
+            "GET",
+            f"/sites/{site_uuid}/analysis",
+            api_key=api_key,
+            params={"limit": 1},
+        )
+        if status != HTTP_OK or not resp.get("analyses"):
+            print("No analysis found. Run /botsee analyze first.", file=sys.stderr)
+            sys.exit(1)
+        analysis_uuid = resp["analyses"][0]["uuid"]
+
+    print("⏳ Generating recommendations...")
+    resp, status = api_call("POST", f"/analysis/{analysis_uuid}/recommendations", api_key=api_key)
+
+    if status == HTTP_PAYMENT_REQUIRED:
+        show_payment_required_help(resp)
+        sys.exit(1)
+    if status == 422:
+        print("Analysis is not yet complete. Wait for it to finish.", file=sys.stderr)
+        sys.exit(1)
+    if status not in (HTTP_OK, HTTP_CREATED):
+        print(f"Failed (HTTP {status}): {resp}", file=sys.stderr)
+        sys.exit(1)
+
+    recommendations = resp.get("recommendations", [])
+    credits_used = resp.get("credits_used", 0)
+
+    print("💡 AI Visibility Recommendations")
+    print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    print("")
+    for i, rec in enumerate(recommendations, 1):
+        priority = rec.get("priority", "?").upper()
+        action = rec.get("action", "?")
+        reasoning = rec.get("reasoning", "")
+        print(f"  {i}. [{priority}] {action}")
+        if reasoning:
+            print(f"     {reasoning}")
+        print("")
+
+    if credits_used:
+        print(f"💰 Used: {credits_used} credits")
+    else:
+        print("💰 Cached result (no credits used)")
+
+
 # --- Sites CRUD ---
 
 
@@ -1755,6 +1808,9 @@ def main():
     content_parser.add_argument("--question-uuid", help="Target question UUID for content generation")
     content_parser.add_argument("--provider", help="Preferred provider (e.g. gemini)")
 
+    recommend_parser = subparsers.add_parser("recommend", help="Get AI recommendations to improve AI visibility")
+    recommend_parser.add_argument("analysis_uuid", nargs="?", help="Analysis UUID (defaults to latest)")
+
     topup_usdc_parser = subparsers.add_parser(
         "topup-usdc",
         help="Add credits via USDC x402 challenge",
@@ -1911,6 +1967,7 @@ def main():
         "config-show": cmd_config_show,
         "analyze": cmd_analyze,
         "content": cmd_content,
+        "recommend": cmd_recommend,
         "topup-usdc": cmd_topup_usdc,
         "list-sites": cmd_list_sites,
         "get-site": cmd_get_site,
