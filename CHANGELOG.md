@@ -1,6 +1,22 @@
 # Changelog
 
-All notable changes to the BotSee Claude Code Skill are documented here.
+All notable changes to the BotSee Claude Code Plugin are documented here.
+
+## [0.3.0] - 2026-03-04
+
+### Changed
+
+- Converted from skill format to plugin format for marketplace distribution and auto-updates
+- Moved `scripts/botsee.py` to `skills/botsee/botsee.py` (co-located with SKILL.md)
+- Updated all script paths from `~/.claude/skills/botsee/scripts/botsee.py` to `${CLAUDE_PLUGIN_ROOT}/skills/botsee/botsee.py`
+- Upgraded `plugin.json` to full plugin manifest with structured author, repository, keywords
+- Removed root `SKILL.md` (plugins auto-discover from `skills/*/SKILL.md`)
+- Updated README with plugin installation via marketplace and direct CLI instructions for cross-platform use
+
+### Removed
+
+- Manual `cp -r` installation method (replaced by `/install-plugin`)
+- Explicit `skills` array in `plugin.json` (auto-discovery)
 
 ## [0.2.7] - 2026-02-25
 

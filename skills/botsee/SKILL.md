@@ -1,7 +1,7 @@
 ---
 name: botsee
 description: Monitor your brand's AI visibility via BotSee API
-version: 0.2.7
+version: 0.3.0
 ---
 
 # BotSee Skill
@@ -67,7 +67,7 @@ When user invokes a BotSee command, run the corresponding Python script. All com
 ### /botsee (status)
 
 ```bash
-python3 ~/.claude/skills/botsee/scripts/botsee.py status
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/botsee/botsee.py status
 ```
 
 ### /botsee signup [--email EMAIL] [--name NAME] [--company COMPANY] [--api-key KEY]
@@ -76,7 +76,7 @@ python3 ~/.claude/skills/botsee/scripts/botsee.py status
 
 **Step 1: Get signup URL**
 ```bash
-python3 ~/.claude/skills/botsee/scripts/botsee.py signup
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/botsee/botsee.py signup
 ```
 
 The command prints a line like:
@@ -114,7 +114,7 @@ When `signup-usdc` is invoked without already knowing the user's preference, ask
 
 Call:
 ```bash
-python3 ~/.claude/skills/botsee/scripts/botsee.py signup-usdc
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/botsee/botsee.py signup-usdc
 ```
 (no `--no-email` flag)
 
@@ -134,7 +134,7 @@ Do NOT call `signup-pay-usdc` yet. Wait for the user to confirm they've complete
 
 Call:
 ```bash
-python3 ~/.claude/skills/botsee/scripts/botsee.py signup-usdc --no-email
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/botsee/botsee.py signup-usdc --no-email
 ```
 
 No setup URL will be returned. Immediately proceed to payment.
@@ -144,8 +144,8 @@ No setup URL will be returned. Immediately proceed to payment.
 After the email-path user confirms they visited the setup URL (or immediately for no-email path):
 
 ```bash
-python3 ~/.claude/skills/botsee/scripts/botsee.py signup-pay-usdc --amount-cents 250
-python3 ~/.claude/skills/botsee/scripts/botsee.py signup-status
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/botsee/botsee.py signup-pay-usdc --amount-cents 250
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/botsee/botsee.py signup-status
 ```
 
 **x402 flow details:**
@@ -159,10 +159,10 @@ python3 ~/.claude/skills/botsee/scripts/botsee.py signup-status
 
 ```bash
 # Step 1: Get 402 challenge (no --payment → returns payment requirements)
-python3 ~/.claude/skills/botsee/scripts/botsee.py signup-pay-usdc --amount-cents 250
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/botsee/botsee.py signup-pay-usdc --amount-cents 250
 
 # Step 2: Retry with proof after wallet pays
-python3 ~/.claude/skills/botsee/scripts/botsee.py signup-pay-usdc --amount-cents 250 --payment <proof>
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/botsee/botsee.py signup-pay-usdc --amount-cents 250 --payment <proof>
 ```
 
 Omit `--payment` to get a 402 challenge with network, amount, and `payTo` address.
@@ -171,7 +171,7 @@ Include `--payment <base64-proof>` on the final retry after your wallet has made
 ### /botsee signup-status [--token TOKEN]
 
 ```bash
-python3 ~/.claude/skills/botsee/scripts/botsee.py signup-status
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/botsee/botsee.py signup-status
 ```
 
 Saves API key to `~/.botsee/config.json` automatically once signup is completed.
@@ -179,7 +179,7 @@ Saves API key to `~/.botsee/config.json` automatically once signup is completed.
 ### /botsee reset-api-key --token TOKEN
 
 ```bash
-python3 ~/.claude/skills/botsee/scripts/botsee.py reset-api-key --token <token>
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/botsee/botsee.py reset-api-key --token <token>
 ```
 
 Exchanges a one-time reset token (generated on the BotSee web dashboard) for a new API key.
@@ -190,10 +190,10 @@ On success, the new key is saved to `~/.botsee/config.json` and the old key is r
 
 ```bash
 # Step 1: Get 402 challenge (no --payment → returns payment requirements)
-python3 ~/.claude/skills/botsee/scripts/botsee.py topup-usdc --amount-cents 5000
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/botsee/botsee.py topup-usdc --amount-cents 5000
 
 # Step 2: Retry with proof after wallet pays
-python3 ~/.claude/skills/botsee/scripts/botsee.py topup-usdc --amount-cents 5000 --payment <proof>
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/botsee/botsee.py topup-usdc --amount-cents 5000 --payment <proof>
 ```
 
 Omit `--payment` to get a 402 challenge with network, amount, and `payTo` address.
@@ -204,7 +204,7 @@ Include `--payment <base64-proof>` on the final retry after your wallet has made
 **Requires:** API key from `/botsee signup`
 
 ```bash
-python3 ~/.claude/skills/botsee/scripts/botsee.py create-site <domain>
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/botsee/botsee.py create-site <domain>
 ```
 
 **Optional parameters:**
@@ -219,19 +219,19 @@ python3 ~/.claude/skills/botsee/scripts/botsee.py create-site <domain>
 
 **Customize generation counts:**
 ```bash
-python3 ~/.claude/skills/botsee/scripts/botsee.py create-site <domain> --types 3 --personas 2 --questions 10
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/botsee/botsee.py create-site <domain> --types 3 --personas 2 --questions 10
 ```
 
 ### /botsee config-show
 
 ```bash
-python3 ~/.claude/skills/botsee/scripts/botsee.py config-show
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/botsee/botsee.py config-show
 ```
 
 ### /botsee analyze
 
 ```bash
-python3 ~/.claude/skills/botsee/scripts/botsee.py analyze
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/botsee/botsee.py analyze
 ```
 
 Starts analysis, polls until complete, then displays competitors, keywords, and sources.
@@ -239,7 +239,7 @@ Starts analysis, polls until complete, then displays competitors, keywords, and 
 ### /botsee content
 
 ```bash
-python3 ~/.claude/skills/botsee/scripts/botsee.py content
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/botsee/botsee.py content
 ```
 
 Generates blog post from latest analysis. Auto-saves to `botsee-YYYYMMDD-HHMMSS.md`.
@@ -251,13 +251,13 @@ Generates blog post from latest analysis. Auto-saves to `botsee-YYYYMMDD-HHMMSS.
 ### /botsee list-sites
 
 ```bash
-python3 ~/.claude/skills/botsee/scripts/botsee.py list-sites
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/botsee/botsee.py list-sites
 ```
 
 ### /botsee get-site [uuid]
 
 ```bash
-python3 ~/.claude/skills/botsee/scripts/botsee.py get-site [uuid]
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/botsee/botsee.py get-site [uuid]
 ```
 
 If uuid is omitted, uses the site from `~/.botsee/config.json`.
@@ -265,13 +265,13 @@ If uuid is omitted, uses the site from `~/.botsee/config.json`.
 ### /botsee create-site <domain>
 
 ```bash
-python3 ~/.claude/skills/botsee/scripts/botsee.py create-site <domain>
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/botsee/botsee.py create-site <domain>
 ```
 
 ### /botsee archive-site [uuid]
 
 ```bash
-python3 ~/.claude/skills/botsee/scripts/botsee.py archive-site [uuid]
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/botsee/botsee.py archive-site [uuid]
 ```
 
 ---
@@ -281,25 +281,25 @@ python3 ~/.claude/skills/botsee/scripts/botsee.py archive-site [uuid]
 ### /botsee list-types
 
 ```bash
-python3 ~/.claude/skills/botsee/scripts/botsee.py list-types
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/botsee/botsee.py list-types
 ```
 
 ### /botsee get-type <uuid>
 
 ```bash
-python3 ~/.claude/skills/botsee/scripts/botsee.py get-type <uuid>
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/botsee/botsee.py get-type <uuid>
 ```
 
 ### /botsee create-type <name> [description]
 
 ```bash
-python3 ~/.claude/skills/botsee/scripts/botsee.py create-type "Enterprise Buyers" "Large companies seeking solutions"
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/botsee/botsee.py create-type "Enterprise Buyers" "Large companies seeking solutions"
 ```
 
 ### /botsee generate-types [count]
 
 ```bash
-python3 ~/.claude/skills/botsee/scripts/botsee.py generate-types 3
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/botsee/botsee.py generate-types 3
 ```
 
 Defaults to 2 if count is omitted.
@@ -307,13 +307,13 @@ Defaults to 2 if count is omitted.
 ### /botsee update-type <uuid> [name] [description]
 
 ```bash
-python3 ~/.claude/skills/botsee/scripts/botsee.py update-type <uuid> --name "New Name" --description "New description"
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/botsee/botsee.py update-type <uuid> --name "New Name" --description "New description"
 ```
 
 ### /botsee archive-type <uuid>
 
 ```bash
-python3 ~/.claude/skills/botsee/scripts/botsee.py archive-type <uuid>
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/botsee/botsee.py archive-type <uuid>
 ```
 
 ---
@@ -323,26 +323,26 @@ python3 ~/.claude/skills/botsee/scripts/botsee.py archive-type <uuid>
 ### /botsee list-personas [type_uuid]
 
 ```bash
-python3 ~/.claude/skills/botsee/scripts/botsee.py list-personas
-python3 ~/.claude/skills/botsee/scripts/botsee.py list-personas <type_uuid>
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/botsee/botsee.py list-personas
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/botsee/botsee.py list-personas <type_uuid>
 ```
 
 ### /botsee get-persona <uuid>
 
 ```bash
-python3 ~/.claude/skills/botsee/scripts/botsee.py get-persona <uuid>
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/botsee/botsee.py get-persona <uuid>
 ```
 
 ### /botsee create-persona <type_uuid> <name> [description]
 
 ```bash
-python3 ~/.claude/skills/botsee/scripts/botsee.py create-persona <type_uuid> "Sarah Chen" "VP of Marketing at mid-sized SaaS company"
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/botsee/botsee.py create-persona <type_uuid> "Sarah Chen" "VP of Marketing at mid-sized SaaS company"
 ```
 
 ### /botsee generate-personas <type_uuid> [count]
 
 ```bash
-python3 ~/.claude/skills/botsee/scripts/botsee.py generate-personas <type_uuid> 3
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/botsee/botsee.py generate-personas <type_uuid> 3
 ```
 
 Defaults to 2 if count is omitted.
@@ -350,13 +350,13 @@ Defaults to 2 if count is omitted.
 ### /botsee update-persona <uuid> [name] [description]
 
 ```bash
-python3 ~/.claude/skills/botsee/scripts/botsee.py update-persona <uuid> --name "New Name" --description "New description"
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/botsee/botsee.py update-persona <uuid> --name "New Name" --description "New description"
 ```
 
 ### /botsee archive-persona <uuid>
 
 ```bash
-python3 ~/.claude/skills/botsee/scripts/botsee.py archive-persona <uuid>
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/botsee/botsee.py archive-persona <uuid>
 ```
 
 ---
@@ -366,26 +366,26 @@ python3 ~/.claude/skills/botsee/scripts/botsee.py archive-persona <uuid>
 ### /botsee list-questions [persona_uuid]
 
 ```bash
-python3 ~/.claude/skills/botsee/scripts/botsee.py list-questions
-python3 ~/.claude/skills/botsee/scripts/botsee.py list-questions <persona_uuid>
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/botsee/botsee.py list-questions
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/botsee/botsee.py list-questions <persona_uuid>
 ```
 
 ### /botsee get-question <uuid>
 
 ```bash
-python3 ~/.claude/skills/botsee/scripts/botsee.py get-question <uuid>
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/botsee/botsee.py get-question <uuid>
 ```
 
 ### /botsee create-question <persona_uuid> <question_text>
 
 ```bash
-python3 ~/.claude/skills/botsee/scripts/botsee.py create-question <persona_uuid> "What are the best email marketing tools?"
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/botsee/botsee.py create-question <persona_uuid> "What are the best email marketing tools?"
 ```
 
 ### /botsee generate-questions <persona_uuid> [count]
 
 ```bash
-python3 ~/.claude/skills/botsee/scripts/botsee.py generate-questions <persona_uuid> 5
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/botsee/botsee.py generate-questions <persona_uuid> 5
 ```
 
 Defaults to 5 if count is omitted.
@@ -393,13 +393,13 @@ Defaults to 5 if count is omitted.
 ### /botsee update-question <uuid> <question_text>
 
 ```bash
-python3 ~/.claude/skills/botsee/scripts/botsee.py update-question <uuid> "What are the best affordable email marketing tools?"
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/botsee/botsee.py update-question <uuid> "What are the best affordable email marketing tools?"
 ```
 
 ### /botsee delete-question <uuid>
 
 ```bash
-python3 ~/.claude/skills/botsee/scripts/botsee.py delete-question <uuid>
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/botsee/botsee.py delete-question <uuid>
 ```
 
 ---
@@ -409,25 +409,25 @@ python3 ~/.claude/skills/botsee/scripts/botsee.py delete-question <uuid>
 ### /botsee results-competitors <analysis_uuid>
 
 ```bash
-python3 ~/.claude/skills/botsee/scripts/botsee.py results-competitors <analysis_uuid>
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/botsee/botsee.py results-competitors <analysis_uuid>
 ```
 
 ### /botsee results-keywords <analysis_uuid>
 
 ```bash
-python3 ~/.claude/skills/botsee/scripts/botsee.py results-keywords <analysis_uuid>
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/botsee/botsee.py results-keywords <analysis_uuid>
 ```
 
 ### /botsee results-sources <analysis_uuid>
 
 ```bash
-python3 ~/.claude/skills/botsee/scripts/botsee.py results-sources <analysis_uuid>
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/botsee/botsee.py results-sources <analysis_uuid>
 ```
 
 ### /botsee results-responses <analysis_uuid>
 
 ```bash
-python3 ~/.claude/skills/botsee/scripts/botsee.py results-responses <analysis_uuid>
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/botsee/botsee.py results-responses <analysis_uuid>
 ```
 
 **Getting the Analysis UUID:**
