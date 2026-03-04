@@ -1,10 +1,10 @@
-# BotSee Skill for Claude Code
+# BotSee Plugin for Claude Code
 
 > Monitor your brand's AI visibility across ChatGPT, Claude, Perplexity, and Gemini.
 
-**Version:** 0.2.7
+**Version:** 0.3.0
 
-BotSee is an agent-first API that delivers structured data from every major AI search engine — competitors, keywords, sources, and raw responses — programmatically, from Claude Code.
+BotSee is an agent-first API that delivers structured data from every major AI search engine — competitors, keywords, sources, and raw responses — programmatically, from Claude Code and other AI coding platforms.
 
 - Find competitors as AI search engines see them
 - Measure share of voice vs competitors
@@ -15,18 +15,23 @@ BotSee is an agent-first API that delivers structured data from every major AI s
 
 ## Installation
 
-Copy the entire skill directory to Claude Code:
-```bash
-# macOS/Linux
-cp -r . ~/.claude/skills/botsee
+### Claude Code Plugin (recommended — auto-updates)
+
+```
+/install-plugin https://github.com/RivalSee/botsee-marketplace
 ```
 
-Restart Claude Code or reload skills.
+### Direct CLI (Codex, Cursor, any platform)
+
+```bash
+git clone https://github.com/RivalSee/botsee-skill.git
+python3 botsee-skill/skills/botsee/botsee.py status
+```
 
 ## Requirements
 
-- Claude Code
 - Python 3 (pre-installed on macOS)
+- Claude Code, Codex, or any AI coding agent
 
 ## Quick Start (Credit Card)
 
@@ -92,7 +97,7 @@ Use these natural language prompts to guide Claude through the complete BotSee w
 
 ### Prompt 1: Install & Signup
 ```
-Install the BotSee Skill from github.com/RivalSee/botsee-skill. Then sign me up for BotSee using my email user@example.com so I can analyze how AI search engines see my product.
+Install the BotSee Plugin from github.com/RivalSee/botsee-marketplace. Then sign me up for BotSee using my email user@example.com so I can analyze how AI search engines see my product.
 ```
 
 ### Prompt 2: Create Site with Structure

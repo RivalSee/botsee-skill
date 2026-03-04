@@ -13,7 +13,7 @@ import urllib.request
 from pathlib import Path
 
 # Version
-__version__ = "0.2.7"
+__version__ = "0.3.0"
 
 # API Configuration
 BASE_URL = os.environ.get("BOTSEE_BASE_URL", "https://botsee.io")
