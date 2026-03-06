@@ -18,7 +18,7 @@ BotSee is an agent-first API that delivers structured data from every major AI s
 ### Claude Code Plugin (recommended — auto-updates)
 
 ```
-/install-plugin https://github.com/RivalSee/botsee-marketplace
+/plugin marketplace add rivalsee/botsee
 ```
 
 ### Direct CLI (Codex, Cursor, any platform)
@@ -97,7 +97,7 @@ Use these natural language prompts to guide Claude through the complete BotSee w
 
 ### Prompt 1: Install & Signup
 ```
-Install the BotSee Plugin from github.com/RivalSee/botsee-marketplace. Then sign me up for BotSee using my email user@example.com so I can analyze how AI search engines see my product.
+Install the BotSee plugin: /plugin marketplace add rivalsee/botsee. Then sign me up for BotSee using my email user@example.com so I can analyze how AI search engines see my product.
 ```
 
 ### Prompt 2: Create Site with Structure
