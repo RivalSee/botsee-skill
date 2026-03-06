@@ -1239,7 +1239,7 @@ def cmd_list_sites(args):
         url = s.get("url", "?")
         name = s.get("product_name", "?")
         active_marker = " ⭐" if uuid == active_uuid else ""
-        print(f"  {uuid[:8]}... - {url} ({name}){active_marker}")
+        print(f"  {uuid} - {url} ({name}){active_marker}")
 
 
 def cmd_get_site(args):
@@ -1307,7 +1307,7 @@ def cmd_list_types(args):
         uuid = t.get("uuid", "?")
         name = t.get("name", "?")
         desc = t.get("description", "")[:50]
-        print(f"  {uuid[:8]}... - {name}")
+        print(f"  {uuid} - {name}")
         if desc:
             print(f"    {desc}...")
 
@@ -1399,7 +1399,7 @@ def cmd_list_personas(args):
         uuid = p.get("uuid", "?")
         name = p.get("name", "?")
         desc = p.get("description", "")[:50]
-        print(f"  {uuid[:8]}... - {name}")
+        print(f"  {uuid} - {name}")
         if desc:
             print(f"    {desc}...")
 
@@ -1489,7 +1489,7 @@ def cmd_list_questions(args):
     for q in questions:
         uuid = q.get("uuid", "?")
         text = (q.get("text") or q.get("question") or "?")[:80]
-        print(f"  {uuid[:8]}... - {text}")
+        print(f"  {uuid} - {text}")
 
 
 def cmd_get_question(args):
