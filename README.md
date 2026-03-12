@@ -700,6 +700,34 @@ Next: /botsee analyze
 /botsee results-responses
 ```
 
+### AI Visibility Audit (Full Workflow)
+
+Run a complete AI visibility audit — analyze how AI search engines see a site, identify terminology gaps, and make surgical landing page copy changes.
+
+```bash
+# 1. Create site with customer types, personas, questions
+/botsee create-site https://example.com
+
+# 2. Review and refine auto-generated questions
+/botsee list-questions <persona_uuid>
+/botsee delete-question <question_uuid>
+/botsee create-question <persona_uuid> "What tools help with AI search optimization?"
+
+# 3. Run analysis (~660 credits)
+/botsee analyze
+
+# 4. Pull keyword and source opportunities
+/botsee results-keyword-opportunities <analysis_uuid>
+/botsee results-source-opportunities <analysis_uuid>
+
+# 5. Compare opportunities against live homepage copy
+# 6. Make surgical text changes to close terminology gaps
+# 7. Compile, verify, and ship
+```
+
+**Total cost:** ~735 credits (75 setup + 660 analysis) | **Time:** ~25 min
+
+The `/ai-visibility-audit` skill automates this entire workflow. Install the plugin to use it.
 
 ## Configuration Management
 
