@@ -246,6 +246,29 @@ Generates blog post from latest analysis. Auto-saves to `botsee-YYYYMMDD-HHMMSS.
 
 ---
 
+## Usage & Billing Commands
+
+### /botsee usage-by-site [--from DATE] [--to DATE] [--site-uuid UUID]
+
+```bash
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/botsee/botsee.py usage-by-site
+```
+
+Credit usage grouped by site: per-site totals plus a per-category breakdown.
+`--from`/`--to` are ISO 8601 dates; `--site-uuid` limits to one site. (`GET /api/v1/usage/by-site`)
+
+### /botsee usage-line-items [--from DATE] [--to DATE] [--site-uuid UUID] [--category CAT] [--limit N]
+
+```bash
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/botsee/botsee.py usage-line-items
+```
+
+Individual paid operations (line items), newest first — date, site, category,
+operation, and credits. Same data as the dashboard "Details" table and CSV export.
+(`GET /api/v1/usage/line-items`)
+
+---
+
 ## Sites Commands
 
 ### /botsee list-sites

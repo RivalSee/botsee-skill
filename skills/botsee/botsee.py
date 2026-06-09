@@ -392,6 +392,79 @@ def cmd_status(args):
     print("  /botsee content               - Generate blog post")
 
 
+def cmd_usage_by_site(args):
+    """Show credit usage grouped by site (totals + per-category breakdown)."""
+    config = require_user_config()
+    params = {}
+    if getattr(args, "from_time", None):
+        params["from"] = args.from_time
+    if getattr(args, "to_time", None):
+        params["to"] = args.to_time
+    if getattr(args, "site_uuid", None):
+        params["site_uuid"] = args.site_uuid
+
+    resp, status = api_call(
+        "GET",
+        "/usage/by-site",
+        api_key=config["api_key"],
+        params=params or None,
+    )
+    if status != HTTP_OK:
+        print(f"Failed (HTTP {status}): {resp}", file=sys.stderr)
+        sys.exit(1)
+
+    sites = resp.get("sites", [])
+    if not sites:
+        print("No usage in this range.")
+        return
+
+    print(f"Usage by site ({len(sites)}):")
+    for s in sites:
+        print(f"  {s.get('domain', '?')} - {s.get('total_credits', 0)} credits")
+        for b in s.get("breakdown", []):
+            print(f"      {b.get('category', '?')}: {b.get('credits', 0)}")
+
+
+def cmd_usage_line_items(args):
+    """List individual paid operations (line items), newest first."""
+    config = require_user_config()
+    params = {}
+    if getattr(args, "from_time", None):
+        params["from"] = args.from_time
+    if getattr(args, "to_time", None):
+        params["to"] = args.to_time
+    if getattr(args, "site_uuid", None):
+        params["site_uuid"] = args.site_uuid
+    if getattr(args, "category", None):
+        params["category"] = args.category
+    if getattr(args, "limit", None):
+        params["limit"] = args.limit
+
+    resp, status = api_call(
+        "GET",
+        "/usage/line-items",
+        api_key=config["api_key"],
+        params=params or None,
+    )
+    if status != HTTP_OK:
+        print(f"Failed (HTTP {status}): {resp}", file=sys.stderr)
+        sys.exit(1)
+
+    items = resp.get("line_items", [])
+    if not items:
+        print("No usage in this range.")
+        return
+
+    print(f"Line items ({len(items)}):")
+    for i in items:
+        when = i.get("last_charged_at", "?")
+        print(
+            f"  {when} - {i.get('domain', '?')} - "
+            f"{i.get('category', '?')}/{i.get('operation', '?')} - "
+            f"{i.get('credits', 0)} credits"
+        )
+
+
 def cmd_account(_args):
     """Show account details including email and company."""
     config = require_user_config()
@@ -1724,6 +1797,23 @@ def main():
     status_parser.add_argument("--cursor", help="Usage pagination cursor")
     status_parser.add_argument("--from", dest="from_time", help="Usage window start timestamp")
     status_parser.add_argument("--to", dest="to_time", help="Usage window end timestamp")
+
+    usage_by_site_parser = subparsers.add_parser(
+        "usage-by-site", help="Credit usage grouped by site (totals + breakdown)"
+    )
+    usage_by_site_parser.add_argument("--from", dest="from_time", help="Start date (ISO 8601)")
+    usage_by_site_parser.add_argument("--to", dest="to_time", help="End date (ISO 8601)")
+    usage_by_site_parser.add_argument("--site-uuid", help="Limit to one site")
+
+    usage_line_items_parser = subparsers.add_parser(
+        "usage-line-items", help="Individual paid operations, newest first"
+    )
+    usage_line_items_parser.add_argument("--from", dest="from_time", help="Start date (ISO 8601)")
+    usage_line_items_parser.add_argument("--to", dest="to_time", help="End date (ISO 8601)")
+    usage_line_items_parser.add_argument("--site-uuid", help="Limit to one site")
+    usage_line_items_parser.add_argument("--category", help="Limit to one operation category")
+    usage_line_items_parser.add_argument("--limit", type=int, help="Max line items (default 200)")
+
     subparsers.add_parser("account", help="Show account details (email, company)")
 
     signup_parser = subparsers.add_parser(
@@ -1955,6 +2045,8 @@ def main():
 
     commands = {
         "status": cmd_status,
+        "usage-by-site": cmd_usage_by_site,
+        "usage-line-items": cmd_usage_line_items,
         "account": cmd_account,
         "signup": cmd_signup,
         "signup-usdc": cmd_signup_usdc,
