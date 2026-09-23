@@ -1892,7 +1892,7 @@ def main():
     analyze_parser = subparsers.add_parser("analyze", help="Run competitive analysis")
     analyze_parser.add_argument("site_uuid", nargs="?", help="Site UUID (optional, defaults to active site)")
     analyze_parser.add_argument("--scope", help="Analysis scope (e.g. site)")
-    analyze_parser.add_argument("--models", help="Comma-separated models (e.g. openai,claude,perplexity)")
+    analyze_parser.add_argument("--models", help="Comma-separated models (e.g. openai-search,claude,gemini)")
 
     content_parser = subparsers.add_parser("content", help="Generate blog post from analysis")
     content_parser.add_argument("--question-uuid", help="Target question UUID for content generation")

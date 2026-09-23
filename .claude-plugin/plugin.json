@@ -1,6 +1,6 @@
 {
   "name": "botsee",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Monitor your brand's AI visibility (AI SEO/GEO) across ChatGPT, Claude, Perplexity, and Gemini via the BotSee API.",
   "author": {
     "name": "BotSee / RivalSee",

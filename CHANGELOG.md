@@ -2,6 +2,12 @@
 
 All notable changes to the BotSee Claude Code Plugin are documented here.
 
+## [0.3.1] - 2026-09-22
+
+### Changed
+
+- Updated the `analyze --models` help text and examples to the new API default models (`openai-search,claude,gemini`); plain `openai` (ChatGPT without web search) remains accepted when passed explicitly
+
 ## [0.3.0] - 2026-03-04
 
 ### Changed
