@@ -1414,7 +1414,7 @@ def cmd_create_type(args):
 
 
 def cmd_generate_types(args):
-    """AI-generate customer types (5 credits each)."""
+    """AI-generate customer types (estimated ~5 credits each; actual follows token usage)."""
     config = require_user_config()
     site_uuid = args.site_uuid or config["site_uuid"]
     resp, status = api_call(
@@ -1506,7 +1506,7 @@ def cmd_create_persona(args):
 
 
 def cmd_generate_personas(args):
-    """AI-generate personas (5 credits each)."""
+    """AI-generate personas (estimated ~5 credits each; actual follows token usage)."""
     config = require_user_config()
     resp, status = api_call(
         "POST", f"/customer-types/{args.type_uuid}/personas/generate",
@@ -1593,7 +1593,7 @@ def cmd_create_question(args):
 
 
 def cmd_generate_questions(args):
-    """AI-generate questions (10 credits flat)."""
+    """AI-generate questions (estimated ~10 credits; actual follows token usage)."""
     config = require_user_config()
     resp, status = api_call(
         "POST", f"/personas/{args.persona_uuid}/questions/generate",
@@ -1946,7 +1946,7 @@ def main():
     create_type_parser.add_argument("--name", required=True, help="Type name")
     create_type_parser.add_argument("--description", help="Type description")
 
-    gen_types_parser = subparsers.add_parser("generate-types", help="AI-generate types (5 credits each)")
+    gen_types_parser = subparsers.add_parser("generate-types", help="AI-generate types (estimated ~5 credits)")
     gen_types_parser.add_argument("--site-uuid", help="Site UUID (defaults to config)")
     gen_types_parser.add_argument("--count", type=int, default=2, help="Number to generate")
 
@@ -1970,7 +1970,7 @@ def main():
     create_persona_parser.add_argument("--name", required=True, help="Persona name")
     create_persona_parser.add_argument("--description", help="Persona description")
 
-    gen_personas_parser = subparsers.add_parser("generate-personas", help="AI-generate personas (5 credits each)")
+    gen_personas_parser = subparsers.add_parser("generate-personas", help="AI-generate personas (estimated ~5 credits)")
     gen_personas_parser.add_argument("type_uuid", help="Customer type UUID")
     gen_personas_parser.add_argument("--count", type=int, default=2, help="Number to generate")
 
@@ -1993,7 +1993,7 @@ def main():
     create_question_parser.add_argument("persona_uuid", help="Persona UUID")
     create_question_parser.add_argument("--text", required=True, help="Question text")
 
-    gen_questions_parser = subparsers.add_parser("generate-questions", help="AI-generate questions (10 credits)")
+    gen_questions_parser = subparsers.add_parser("generate-questions", help="AI-generate questions (estimated ~10 credits)")
     gen_questions_parser.add_argument("persona_uuid", help="Persona UUID")
     gen_questions_parser.add_argument("--count", type=int, default=5, help="Number to generate")
 
