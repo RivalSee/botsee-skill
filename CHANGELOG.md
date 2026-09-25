@@ -2,6 +2,13 @@
 
 All notable changes to the BotSee Claude Code Plugin are documented here.
 
+## [0.3.2] - 2026-09-25
+
+### Changed
+
+- Generation cost copy now labels charges as estimates: the BotSee API bills generation from actual LLM token usage, not fixed per-unit prices
+- `generate-*` command help text, SKILL.md, and README cost figures use `~` estimates
+
 ## [0.3.1] - 2026-09-22
 
 ### Changed

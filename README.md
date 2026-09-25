@@ -53,7 +53,7 @@ python3 botsee-skill/skills/botsee/botsee.py status
 # Run analysis (~660 credits)
 /botsee analyze
 
-# Generate blog post (15 credits)
+# Generate blog post (~15 credits, estimated)
 /botsee content
 
 # Check status and balance
@@ -81,7 +81,7 @@ python3 botsee-skill/skills/botsee/botsee.py status
 # Run analysis (~660 credits)
 /botsee analyze
 
-# Generate blog post (15 credits)
+# Generate blog post (~15 credits, estimated)
 /botsee content
 
 # Check status and balance
@@ -257,11 +257,11 @@ The create-site command will:
 /botsee create-site https://example.com --types 3 --personas 2 --questions 10
 ```
 
-**Cost:** ~75 credits with defaults (2 types, 2 personas/type, 5 questions/persona)
-- Site creation: 5 credits
-- Customer types: 5 credits per type
-- Personas: 5 credits per persona
-- Questions: 10 credits flat per persona
+**Cost:** ~75 credits with defaults (2 types, 2 personas/type, 5 questions/persona) — estimates; actual charges follow LLM token usage
+- Site creation: ~5 credits
+- Customer types: ~5 credits per type
+- Personas: ~5 credits per persona
+- Questions: ~10 credits per persona
 
 #### `/botsee create-site <domain>`
 Save custom configuration for later use with setup.

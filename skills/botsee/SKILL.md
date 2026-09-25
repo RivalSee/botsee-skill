@@ -522,10 +522,10 @@ All operations that consume credits display remaining balance. Agents should:
 - Handle "Insufficient credits" errors gracefully
 - Monitor credit usage (shown after each operation)
 
-**Costs:**
+**Costs (estimates; actual charges follow LLM token usage):**
 - Setup (~75 credits with defaults 2/2/5)
 - Analysis (~660 credits per run)
-- Content generation (15 credits)
+- Content generation (~15 credits)
 
 **6. Error Handling**
 
