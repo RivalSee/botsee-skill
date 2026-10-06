@@ -2,7 +2,7 @@
 
 > Monitor your brand's AI visibility across ChatGPT, Claude, Perplexity, and Gemini.
 
-**Version:** 0.3.0
+**Version:** 0.3.2
 
 BotSee is an agent-first API that delivers structured data from every major AI search engine — competitors, keywords, sources, and raw responses — programmatically, from Claude Code and other AI coding platforms.
 

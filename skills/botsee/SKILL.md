@@ -1,7 +1,7 @@
 ---
 name: botsee
 description: Monitor your brand's AI visibility via BotSee API
-version: 0.3.0
+version: 0.3.2
 ---
 
 # BotSee Skill
