@@ -60,6 +60,23 @@ Commands:
 - /botsee results-sources <uuid>        - View source results
 - /botsee results-responses <uuid>      - View all AI responses
 
+## Measurement defaults
+
+New analyses include persona context so answers reflect the buyer's needs,
+experience, and constraints. Generate profiles in buyer language, without copying
+explicit homepage product terminology. `analyze --no-persona` runs a question-only
+benchmark. Each
+question/model pair is one answer, not an average across repeat samples.
+
+Before running, review questions for company names, branded courses/events,
+coined phrases, and company-specific acronyms. Use ordinary buyer language.
+The preview detects known product/domain/alias terms; unknown coined terms
+still require inspection.
+
+`analyze --dry-run` previews the selected scope for free. The CLI prints a
+planning credit range and warnings before starting any analysis. The range is
+not a spending cap; actual tokens, search calls, and retries determine charges.
+
 ## Implementation
 
 When user invokes a BotSee command, run the corresponding Python script. All commands use a single bundled script that handles API calls internally.

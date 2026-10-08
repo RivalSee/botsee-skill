@@ -2,7 +2,7 @@
 
 > Monitor your brand's AI visibility across ChatGPT, Claude, Perplexity, and Gemini.
 
-**Version:** 0.3.2
+**Version:** 0.3.3
 
 BotSee is an agent-first API that delivers structured data from every major AI search engine — competitors, keywords, sources, and raw responses — programmatically, from Claude Code and other AI coding platforms.
 
@@ -291,7 +291,14 @@ Ready to run: /botsee setup <domain>
 ```
 
 #### `/botsee analyze`
-Runs competitive analysis. Starts the analysis, polls until complete, then displays competitors, keywords, and cited sources.
+Previews the selected AI visibility analysis for free, showing a planning credit range and measurement warnings. Then starts the analysis, polls until complete, and displays competitors, keywords, and cited sources. A failed preview stops before starting a paid run.
+
+```bash
+/botsee analyze --dry-run       # Preview only; no analysis starts
+/botsee analyze --no-persona    # Question-only benchmark
+```
+
+Persona context is included by default. Each question/model pair produces one answer, not an average across repeated samples. The credit range is an estimate, not a spending cap.
 
 ```
 📊 Top Competitors:

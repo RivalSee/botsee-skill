@@ -2,6 +2,19 @@
 
 All notable changes to the BotSee Claude Code Plugin are documented here.
 
+## [0.3.3] - 2026-10-08
+
+### Added
+
+- Free analysis preview with a planning credit range, brand-term warnings and single-sample disclosure before starting a run
+- `analyze --dry-run` to preview without starting an analysis
+- `analyze --no-persona` for a question-only benchmark; persona context remains included by default
+
+### Changed
+
+- Analysis stops when the preview fails, before starting a paid run
+- Generation guidance preserves buyer context while avoiding explicit homepage product names and coined terms
+
 ## [0.3.2] - 2026-09-25
 
 ### Changed
