@@ -1050,14 +1050,33 @@ def cmd_analyze(args):
     print("━━━━━━━━━━━━━━━━━━")
     print("")
 
-    # Start analysis
-    print("⏳ Starting analysis...")
     analysis_payload = {"site_uuid": site_uuid}
     if args.scope:
         analysis_payload["scope"] = args.scope
     models = parse_comma_separated(args.models)
     if models:
         analysis_payload["models"] = models
+    analysis_payload["include_persona"] = not args.no_persona
+
+    preview_resp, preview_status = api_call(
+        "POST", "/analysis", data={**analysis_payload, "dry_run": True}, api_key=api_key,
+    )
+    if preview_status != HTTP_OK:
+        print(f"Analysis preview failed (HTTP {preview_status}): {preview_resp}", file=sys.stderr)
+        sys.exit(1)
+    preview = preview_resp["preview"]
+    cost = preview["estimated_credit_range"]
+    print(f"Estimated credits: {cost['min']}–{cost['max']} (planning range, not a spending cap)")
+    print("One answer per question and model; results are a snapshot, not an average.")
+    for warning in preview["warnings"]:
+        if warning["code"] == "brand_terms":
+            print(f"Warning: brand terms in question {warning['question_uuid']}: {', '.join(warning['terms'])}")
+        elif warning["code"] == "persona_context":
+            print(warning["message"])
+    if args.dry_run:
+        return
+
+    print("⏳ Starting analysis...")
 
     resp, status = api_call(
         "POST",
@@ -1893,6 +1912,8 @@ def main():
     analyze_parser.add_argument("site_uuid", nargs="?", help="Site UUID (optional, defaults to active site)")
     analyze_parser.add_argument("--scope", help="Analysis scope (e.g. site)")
     analyze_parser.add_argument("--models", help="Comma-separated models (e.g. openai-search,claude,gemini)")
+    analyze_parser.add_argument("--dry-run", action="store_true", help="Preview credits and brand warnings for free; do not run analysis")
+    analyze_parser.add_argument("--no-persona", action="store_true", help="Run a question-only benchmark (default: include persona context)")
 
     content_parser = subparsers.add_parser("content", help="Generate blog post from analysis")
     content_parser.add_argument("--question-uuid", help="Target question UUID for content generation")
