@@ -29,6 +29,7 @@ Commands:
 - /botsee get-site [uuid]        - View site details
 - /botsee create-site <domain>   - Create a new site
 - /botsee archive-site [uuid]    - Archive a site
+- /botsee update-site [uuid] --aliases "A, B" - Set brand aliases and/or product_name/value_proposition
 
 **Customer Types:**
 - /botsee list-types             - List customer types
@@ -313,6 +314,25 @@ python3 ${CLAUDE_PLUGIN_ROOT}/skills/botsee/botsee.py create-site <domain>
 ```bash
 python3 ${CLAUDE_PLUGIN_ROOT}/skills/botsee/botsee.py archive-site [uuid]
 ```
+
+### /botsee update-site <uuid> [--aliases "..."] [--product-name "..."] [--value-proposition "..."]
+
+```bash
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/botsee/botsee.py update-site <uuid> --aliases "Acme, Acme Points Maximiser, ACMECON"
+```
+
+Updates a site's editable metadata. All flags are optional; omit a flag to leave
+that field unchanged.
+
+`--aliases` is a comma-separated list of alternate brand names, product names,
+coined phrases, and branded events. Setting it is the reliable way to stop
+BotSee from leaking the brand's own terminology into generated personas and
+research questions: the generation cleanup can only strip identifiers it knows
+about (`product_name`, the domain, and these aliases). Handy for cleaning up a
+persona that already contains your product names.
+
+`created_via`, `billing_status`, `domain`, and `visibility` cannot be changed
+with this command.
 
 ---
 
