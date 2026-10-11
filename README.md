@@ -351,6 +351,18 @@ Create a new site. Saves the new site UUID to config.
 
 **Cost:** 5 credits (auto-generates product_name and value_proposition)
 
+#### `/botsee update-site <uuid> [--aliases "..."] [--product-name "..."] [--value-proposition "..."]`
+Update a site's metadata. Omitted flags leave that field unchanged.
+
+`--aliases` is a comma-separated list of brand names, product names, coined phrases, and branded events. BotSee strips these from generated personas and questions so your own terminology doesn't leak into them.
+
+```bash
+/botsee update-site abc-def-123 --aliases "Acme, Acme Points, ACMECON"
+/botsee update-site abc-def-123 --product-name "Acme Points"
+```
+
+**Cost:** Free
+
 #### `/botsee archive-site [uuid]`
 Archive a site. If uuid is omitted, archives the current site.
 
