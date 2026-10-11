@@ -2,6 +2,13 @@
 
 All notable changes to the BotSee Claude Code Plugin are documented here.
 
+## [0.3.4] - 2026-10-09
+
+### Added
+
+- `update-site` to update aliases, product name, and value proposition without changing omitted fields
+- Command tests for partial updates, empty values, missing flags, and API errors
+
 ## [0.3.3] - 2026-10-08
 
 ### Added

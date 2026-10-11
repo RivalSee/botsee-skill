@@ -13,7 +13,7 @@ import urllib.request
 from pathlib import Path
 
 # Version
-__version__ = "0.3.3"
+__version__ = "0.3.4"
 
 # API Configuration
 BASE_URL = os.environ.get("BOTSEE_BASE_URL", "https://botsee.io")
@@ -1357,6 +1357,44 @@ def cmd_archive_site(args):
         sys.exit(1)
 
 
+def cmd_update_site(args):
+    """Update a site's metadata: product_name, value_proposition, aliases.
+
+    Setting aliases lets BotSee strip the brand's own product names, coined
+    phrases, and branded events from generated personas and questions.
+    """
+    config = require_user_config()
+    data = {}
+    if args.aliases is not None:
+        data["aliases"] = args.aliases
+    if args.product_name is not None:
+        data["product_name"] = args.product_name
+    if args.value_proposition is not None:
+        data["value_proposition"] = args.value_proposition
+
+    if not data:
+        print(
+            "Nothing to update. Provide one of --aliases, --product-name, "
+            "or --value-proposition.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    resp, status = api_call(
+        "PUT", f"/sites/{args.uuid}",
+        data=data, api_key=config["api_key"]
+    )
+    if status not in (200, 204):
+        print(f"Failed (HTTP {status}): {resp}", file=sys.stderr)
+        sys.exit(1)
+
+    site = resp.get("site", {}) if isinstance(resp, dict) else {}
+    if site.get("aliases"):
+        print(f"✅ Site {args.uuid} updated (aliases: {site['aliases']})")
+    else:
+        print(f"✅ Site {args.uuid} updated")
+
+
 def cmd_use_site(args):
     """Switch active site."""
     config = require_user_config()
@@ -1952,6 +1990,17 @@ def main():
     archive_site_parser = subparsers.add_parser("archive-site", help="Archive a site")
     archive_site_parser.add_argument("uuid", help="Site UUID")
 
+    update_site_parser = subparsers.add_parser(
+        "update-site", help="Update site metadata and aliases (FREE)"
+    )
+    update_site_parser.add_argument("uuid", help="Site UUID")
+    update_site_parser.add_argument(
+        "--aliases",
+        help="Comma-separated brand/product/coined aliases to strip from generated personas and questions",
+    )
+    update_site_parser.add_argument("--product-name", help="New product name")
+    update_site_parser.add_argument("--value-proposition", help="New value proposition")
+
     use_site_parser = subparsers.add_parser("use-site", help="Switch active site")
     use_site_parser.add_argument("uuid", help="Site UUID")
 
@@ -2085,6 +2134,7 @@ def main():
         "list-sites": cmd_list_sites,
         "get-site": cmd_get_site,
         "archive-site": cmd_archive_site,
+        "update-site": cmd_update_site,
         "use-site": cmd_use_site,
         "list-types": cmd_list_types,
         "get-type": cmd_get_type,
